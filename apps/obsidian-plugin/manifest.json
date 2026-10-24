@@ -1,0 +1,10 @@
+{
+  "id": "obsidian-duet-agent",
+  "name": "Obsidian Duet Agent",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "Collaborative multi-agent AI assistant integrated natively into Obsidian with vault awareness, diff review, and Windows background companion.",
+  "author": "Obsidian Duet Agent Team",
+  "authorUrl": "https://github.com",
+  "isDesktopOnly": false
+}

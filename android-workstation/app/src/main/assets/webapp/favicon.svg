@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <!-- Deep Obsidian Graphite Squircle Background -->
+  <rect width="512" height="512" rx="112" fill="#0E1217" />
+  <rect width="506" height="506" x="3" y="3" rx="110" stroke="#21262D" stroke-width="6" />
+
+  <!-- Facet 1: Top-Right Crisp Off-White Highlight -->
+  <path
+    d="M262,84 L348,162 L275,152 Z"
+    fill="#F3F4F6"
+  />
+
+  <!-- Facet 2: Upper-Left Medium Steel-Slate -->
+  <path
+    d="M254,84 L267,154 L211,284 L169,162 Z"
+    fill="#64748B"
+  />
+
+  <!-- Facet 3: Main Right Cool Silver-Slate -->
+  <path
+    d="M274,160 L350,171 L301,357 L215,289 Z"
+    fill="#94A3B8"
+  />
+
+  <!-- Facet 4: Far-Left Vertical Deep Slate -->
+  <path
+    d="M166,174 L207,292 L166,362 Z"
+    fill="#3B4758"
+  />
+
+  <!-- Facet 5: Bottom-Left Dark Slate -->
+  <path
+    d="M169,370 L209,299 L244,427 Z"
+    fill="#475569"
+  />
+
+  <!-- Facet 6: Bottom-Right Medium-Dark Slate -->
+  <path
+    d="M216,298 L298,363 L252,428 Z"
+    fill="#5A677A"
+  />
+
+  <!-- Olive-Sage Terminal Cursor Underscore ("_") -->
+  <path
+    d="M332,334 H416 V360 H332 Z"
+    fill="#9EC43B"
+  />
+</svg>

@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<title>OBSIDIAN Mobile — Multi-Agent Loop Workstation</title>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          "colors": {
+            "surface-dim": "#10141a",
+            "secondary-fixed-dim": "#a2c9ff",
+            "surface-container-high": "#262a31",
+            "secondary": "#a2c9ff",
+            "on-secondary-fixed-variant": "#004882",
+            "outline-variant": "#434937",
+            "on-primary-fixed": "#131f00",
+            "on-error-container": "#ffdad6",
+            "surface-container-low": "#181c22",
+            "on-primary-container": "#4c6f00",
+            "primary-fixed": "#bdf45b",
+            "surface": "#10141a",
+            "on-surface-variant": "#c3c9b2",
+            "tertiary": "#ffffff",
+            "surface-tint": "#a2d742",
+            "primary": "#ffffff",
+            "inverse-surface": "#dfe2eb",
+            "secondary-fixed": "#d3e4ff",
+            "primary-container": "#bdf45b",
+            "inverse-on-surface": "#2d3137",
+            "tertiary-container": "#ffdad2",
+            "on-tertiary-container": "#b23c21",
+            "outline": "#8d937e",
+            "surface-variant": "#31353c",
+            "on-error": "#690005",
+            "error": "#ffb4ab",
+            "surface-container-highest": "#31353c",
+            "on-tertiary": "#630f00",
+            "on-secondary-container": "#f0f4ff",
+            "surface-bright": "#353940",
+            "primary-fixed-dim": "#a2d742",
+            "tertiary-fixed-dim": "#ffb4a3",
+            "tertiary-fixed": "#ffdad2",
+            "inverse-primary": "#476800",
+            "on-primary-fixed-variant": "#354e00",
+            "on-background": "#dfe2eb",
+            "on-surface": "#dfe2eb",
+            "on-tertiary-fixed": "#3d0600",
+            "on-tertiary-fixed-variant": "#891e06",
+            "surface-container-lowest": "#0a0e14",
+            "surface-container": "#1c2026",
+            "secondary-container": "#0071c7",
+            "background": "#10141a",
+            "on-primary": "#233600",
+            "error-container": "#93000a",
+            "on-secondary-fixed": "#001c38",
+            "on-secondary": "#00315c"
+          },
+          "borderRadius": {
+            "DEFAULT": "0.125rem",
+            "lg": "0.25rem",
+            "xl": "0.5rem",
+            "full": "0.75rem"
+          },
+          "spacing": {
+            "gutter-desktop": "1.5rem",
+            "margin": "1rem",
+            "gutter": "1rem",
+            "space-md": "0.75rem",
+            "space-xl": "2rem",
+            "margin-desktop": "2rem",
+            "space-sm": "0.5rem",
+            "space-lg": "1.25rem",
+            "space-xs": "0.25rem"
+          },
+          "fontFamily": {
+            "code-sm": ["JetBrains Mono"],
+            "headline-xl-mobile": ["Geist"],
+            "headline-xl": ["Geist"],
+            "headline-md": ["Geist"],
+            "body-lg": ["Inter"],
+            "code-lg": ["JetBrains Mono"],
+            "body-md": ["Inter"],
+            "headline-lg-mobile": ["Geist"],
+            "label-sm": ["JetBrains Mono"],
+            "label-md": ["JetBrains Mono"],
+            "headline-sm": ["Geist"],
+            "headline-lg": ["Geist"],
+            "body-sm": ["Inter"]
+          },
+          "fontSize": {
+            "code-sm": ["0.8125rem", { "lineHeight": "1.35rem", "letterSpacing": "0", "fontWeight": "400" }],
+            "headline-xl-mobile": ["2rem", { "lineHeight": "2.5rem", "letterSpacing": "-0.03em", "fontWeight": "600" }],
+            "headline-xl": ["3rem", { "lineHeight": "3.5rem", "letterSpacing": "-0.04em", "fontWeight": "600" }],
+            "headline-md": ["1.5rem", { "lineHeight": "2rem", "letterSpacing": "-0.02em", "fontWeight": "500" }],
+            "body-lg": ["1.125rem", { "lineHeight": "1.75rem", "letterSpacing": "-0.01em", "fontWeight": "400" }],
+            "code-lg": ["0.9375rem", { "lineHeight": "1.6rem", "letterSpacing": "0", "fontWeight": "400" }],
+            "body-md": ["0.9375rem", { "lineHeight": "1.5rem", "letterSpacing": "-0.005em", "fontWeight": "400" }],
+            "headline-lg-mobile": ["1.75rem", { "lineHeight": "2.25rem", "letterSpacing": "-0.025em", "fontWeight": "600" }],
+            "label-sm": ["0.6875rem", { "lineHeight": "0.875rem", "letterSpacing": "0.05em", "fontWeight": "500" }],
+            "label-md": ["0.8125rem", { "lineHeight": "1rem", "letterSpacing": "0.02em", "fontWeight": "500" }],
+            "headline-sm": ["1.25rem", { "lineHeight": "1.75rem", "letterSpacing": "-0.015em", "fontWeight": "500" }],
+            "headline-lg": ["2.25rem", { "lineHeight": "2.75rem", "letterSpacing": "-0.03em", "fontWeight": "600" }],
+            "body-sm": ["0.8125rem", { "lineHeight": "1.25rem", "letterSpacing": "0", "fontWeight": "400" }]
+          }
+        }
+      }
+    }
+  </script>
+<style>
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal;
+      font-style: normal;
+      font-size: 1.125rem;
+      line-height: 1;
+      display: inline-block;
+      text-transform: none;
+      letter-spacing: normal;
+      word-wrap: normal;
+      white-space: nowrap;
+      direction: ltr;
+      -webkit-font-smoothing: antialiased;
+    }
+    /* Technical scrollbars */
+    ::-webkit-scrollbar {
+      width: 3px;
+      height: 3px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #10141a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #31353c;
+    }
+    @keyframes pulseNeon {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.9); }
+    }
+    .animate-neon-pulse {
+      animation: pulseNeon 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    .neon-border-active {
+      box-shadow: 0 0 0 1px #bdf45b, 0 0 12px -2px rgba(189, 244, 91, 0.25);
+    }
+  </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-surface-container-lowest text-on-surface antialiased font-body-sm min-h-screen select-none overflow-x-hidden pb-24">
+<!-- ================= TOP APP BAR (Shared Component Anchor) ================= -->
+<header class="sticky top-0 z-40 bg-surface-container-low border-b border-outline-variant flex justify-between items-center h-14 w-full px-4 max-w-full">
+<div class="flex items-center space-x-2">
+<span class="material-symbols-outlined text-primary-container" data-icon="terminal">terminal</span>
+<div class="flex items-center space-x-1.5">
+<span class="font-headline-sm text-headline-sm font-semibold tracking-wider text-primary">OBSIDIAN</span>
+<span class="font-label-sm text-label-sm text-outline px-1 py-0.5 rounded bg-surface-container-high">v2.4.9</span>
+</div>
+</div>
+<div class="flex items-center space-x-2">
+<div class="flex items-center space-x-1.5 px-2 py-0.5 rounded bg-surface-container border border-outline-variant text-on-surface-variant font-label-sm text-label-sm">
+<span class="w-1.5 h-1.5 rounded-full bg-primary-container animate-neon-pulse"></span>
+<span class="text-primary-container font-semibold">2 Pending</span>
+</div>
+<button class="w-8 h-8 flex items-center justify-center rounded text-on-surface-variant hover:bg-surface-container-highest transition-colors active:scale-[0.98]">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</header>
+<!-- ================= TASK RUNNER SUB-HEADER & EXECUTION CONTROLS ================= -->
+<section class="bg-surface-container-low border-b border-outline-variant px-4 py-2.5">
+<div class="flex items-start justify-between gap-2">
+<div class="flex-1 min-w-0">
+<div class="flex items-center space-x-1.5 text-outline text-label-sm font-label-sm mb-0.5">
+<span class="material-symbols-outlined text-outline text-xs" data-icon="alt_route">alt_route</span>
+<span>TASK-4089</span>
+<span>•</span>
+<span class="text-secondary truncate">branch: fix/sqlite-wal-store</span>
+</div>
+<h1 class="font-headline-sm text-headline-sm text-primary truncate tracking-tight font-semibold">
+          Refactor auth &amp; SQLite session store
+        </h1>
+</div>
+<!-- Runtime quick control cluster -->
+<div class="flex items-center gap-1.5 pt-0.5 shrink-0">
+<button class="w-7 h-7 flex items-center justify-center rounded bg-surface-container border border-outline-variant text-secondary-fixed hover:bg-surface-container-high transition-colors active:scale-[0.96]" title="Pause execution">
+<span class="material-symbols-outlined text-sm" data-icon="pause">pause</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center rounded bg-surface-container border border-outline-variant text-primary-container hover:bg-surface-container-high transition-colors active:scale-[0.96]" title="Resume / Step">
+<span class="material-symbols-outlined text-sm" data-icon="play_arrow">play_arrow</span>
+</button>
+<button class="w-7 h-7 flex items-center justify-center rounded bg-surface-container border border-error/40 text-error hover:bg-error-container/30 transition-colors active:scale-[0.96]" title="Halt agent loop">
+<span class="material-symbols-outlined text-sm" data-icon="stop">stop</span>
+</button>
+</div>
+</div>
+<!-- Telemetry strip -->
+<div class="mt-2 pt-2 border-t border-outline-variant/60 flex items-center justify-between text-label-sm font-label-sm">
+<div class="flex items-center space-x-1.5">
+<span class="w-2 h-2 rounded-full bg-primary-container animate-neon-pulse"></span>
+<span class="text-primary font-semibold tracking-wide">RUNNING (Step 7/15)</span>
+</div>
+<div class="flex items-center space-x-3 text-outline">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-xs" data-icon="memory">memory</span>
+<span>48 t/s</span>
+</span>
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-xs" data-icon="timer">timer</span>
+<span>14.8s</span>
+</span>
+<span class="text-primary-container font-mono">18.4k tok</span>
+</div>
+</div>
+</section>
+<!-- ================= MAIN SCROLLABLE AGENT WORKBENCH ================= -->
+<main class="px-3.5 pt-3.5 space-y-3.5 max-w-md mx-auto">
+<!-- 1. LIVE AGENT & SUB-AGENT HIERARCHY TREE VIEW -->
+<section class="bg-surface-container-low border border-outline-variant rounded p-3">
+<div class="flex items-center justify-between pb-2 border-b border-outline-variant/60">
+<div class="flex items-center space-x-1.5">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="account_tree">account_tree</span>
+<h2 class="font-label-md text-label-md text-primary font-semibold tracking-wide uppercase">Agent Swarm &amp; Hierarchy</h2>
+</div>
+<span class="font-label-sm text-label-sm text-primary-container bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant">
+          4 Tracked
+        </span>
+</div>
+<!-- Root Coordinator Node -->
+<div class="mt-2.5">
+<div class="p-2 bg-surface-container border border-outline-variant rounded flex items-center justify-between">
+<div class="flex items-center space-x-2 min-w-0">
+<div class="w-6 h-6 rounded bg-primary-container/20 border border-primary-container/60 flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-primary-container text-xs" data-icon="hub">hub</span>
+</div>
+<div class="min-w-0">
+<div class="flex items-center space-x-1.5">
+<span class="font-code-sm text-code-sm font-semibold text-primary truncate">Obsidian Coder</span>
+<span class="text-label-sm font-label-sm text-primary-container bg-primary-container/10 px-1 rounded">Coordinator</span>
+</div>
+<p class="font-label-sm text-label-sm text-outline truncate">Claude 3.5 Sonnet • 11.2k tok</p>
+</div>
+</div>
+<span class="w-2 h-2 rounded-full bg-primary-container animate-neon-pulse"></span>
+</div>
+<!-- Spawned Sub-Agents Tree -->
+<div class="ml-3 pl-3 border-l-2 border-outline-variant/80 mt-1 space-y-1.5 pt-1">
+<!-- Sub-agent: Planner -->
+<div class="relative flex items-center justify-between p-1.5 rounded bg-surface-container-lowest/80 border border-outline-variant text-label-sm font-label-sm">
+<span class="absolute -left-[14px] top-1/2 w-2 h-px bg-outline-variant"></span>
+<div class="flex items-center space-x-2 truncate">
+<span class="material-symbols-outlined text-primary-container text-xs" data-icon="check_circle">check_circle</span>
+<span class="text-on-surface font-code-sm truncate">Planner</span>
+<span class="text-outline">3 tasks</span>
+</div>
+<span class="text-outline font-code-sm">1.2s • 840 tok</span>
+</div>
+<!-- Sub-agent: Codebase Researcher -->
+<div class="relative flex items-center justify-between p-1.5 rounded bg-surface-container-lowest/80 border border-outline-variant text-label-sm font-label-sm">
+<span class="absolute -left-[14px] top-1/2 w-2 h-px bg-outline-variant"></span>
+<div class="flex items-center space-x-2 truncate">
+<span class="material-symbols-outlined text-primary-container text-xs" data-icon="check_circle">check_circle</span>
+<span class="text-on-surface font-code-sm truncate">Codebase Researcher</span>
+<span class="text-outline">12 files</span>
+</div>
+<span class="text-outline font-code-sm">3.8s • ripgrep</span>
+</div>
+<!-- Sub-agent: Software Engineer (ACTIVE) -->
+<div class="relative flex items-center justify-between p-2 rounded bg-surface-container neon-border-active border text-label-sm font-label-sm">
+<span class="absolute -left-[14px] top-1/2 w-2 h-px bg-primary-container"></span>
+<div class="flex items-center space-x-2 truncate">
+<span class="material-symbols-outlined text-primary-container text-xs animate-neon-pulse" data-icon="bolt">bolt</span>
+<div>
+<div class="flex items-center space-x-1">
+<span class="text-primary font-semibold font-code-sm truncate">Software Engineer</span>
+<span class="text-on-primary-fixed bg-primary-container px-1 rounded text-[10px] font-bold">RUNNING</span>
+</div>
+<p class="text-primary-container font-label-sm">AST syntax patcher • Step 7/15</p>
+</div>
+</div>
+<span class="text-primary font-mono text-xs">8.2k tok</span>
+</div>
+<!-- Sub-agent: Test Verifier -->
+<div class="relative flex items-center justify-between p-1.5 rounded bg-surface-container-lowest/40 border border-outline-variant/50 text-label-sm font-label-sm opacity-70">
+<span class="absolute -left-[14px] top-1/2 w-2 h-px bg-outline-variant/60"></span>
+<div class="flex items-center space-x-2 truncate">
+<span class="material-symbols-outlined text-outline text-xs" data-icon="hourglass_top">hourglass_top</span>
+<span class="text-on-surface-variant font-code-sm truncate">Test Verifier</span>
+<span class="text-outline">Vitest suite</span>
+</div>
+<span class="text-outline font-code-sm">Queued ⏳</span>
+</div>
+</div>
+</div>
+</section>
+<!-- 2. INTERACTIVE EXECUTION TIMELINE -->
+<section class="bg-surface-container-low border border-outline-variant rounded p-3">
+<div class="flex items-center justify-between mb-2">
+<div class="flex items-center space-x-1.5">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="reorder">reorder</span>
+<h2 class="font-label-md text-label-md text-primary font-semibold tracking-wide uppercase">Execution Timeline</h2>
+</div>
+<span class="text-outline font-label-sm text-label-sm">Step 7 of 15</span>
+</div>
+<!-- Horizontal micro-step trail -->
+<div class="flex items-center gap-1.5 overflow-x-auto py-1 no-scrollbar text-label-sm font-label-sm">
+<div class="flex items-center gap-1 px-2 py-1 rounded bg-surface-container border border-outline-variant whitespace-nowrap text-on-surface-variant">
+<span class="material-symbols-outlined text-primary-container text-xs" data-icon="done">done</span>
+<span>1-4: Schemas &amp; JWT</span>
+</div>
+<div class="flex items-center gap-1 px-2 py-1 rounded bg-surface-container border border-outline-variant whitespace-nowrap text-on-surface-variant">
+<span class="material-symbols-outlined text-primary-container text-xs" data-icon="done">done</span>
+<span>5-6: SQLite Migrations</span>
+</div>
+<div class="flex items-center gap-1 px-2.5 py-1 rounded bg-primary-container/15 border border-primary-container whitespace-nowrap text-primary font-semibold">
+<span class="material-symbols-outlined text-primary-container text-xs animate-neon-pulse" data-icon="flash_on">flash_on</span>
+<span class="text-primary-container">7: Mutate session.ts</span>
+</div>
+<div class="flex items-center gap-1 px-2 py-1 rounded bg-surface-container/40 border border-outline-variant/40 whitespace-nowrap text-outline">
+<span>8-15: Vitest &amp; PR</span>
+</div>
+</div>
+</section>
+<!-- 3. CURRENT ACTIVITY LIVE CARD & APPROVAL INTERCEPT -->
+<section class="bg-surface-container-low border border-outline-variant rounded p-3.5 space-y-3">
+<!-- Agent status chip -->
+<div class="flex items-center justify-between">
+<div class="flex items-center space-x-1.5">
+<span class="w-2 h-2 rounded-full bg-primary-container animate-neon-pulse"></span>
+<span class="font-code-sm text-code-sm text-primary font-medium">Software Engineer</span>
+<span class="text-outline">•</span>
+<span class="text-secondary font-code-sm text-code-sm">executing tool call</span>
+</div>
+<div class="flex items-center space-x-1 bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant font-code-sm text-label-sm">
+<span class="text-primary-container">+42</span>
+<span class="text-outline">/</span>
+<span class="text-error">-8</span>
+</div>
+</div>
+<!-- Agent Reasoning Accordion / Monospace Box -->
+<div class="bg-surface-container p-2.5 rounded border border-outline-variant">
+<div class="flex items-center justify-between text-label-sm font-label-sm text-outline mb-1">
+<span class="flex items-center gap-1">
+<span class="material-symbols-outlined text-xs" data-icon="psychology">psychology</span>
+<span>Reasoning Engine</span>
+</span>
+<span class="text-primary-container font-mono">18ms</span>
+</div>
+<p class="font-code-sm text-code-sm text-on-surface-variant leading-relaxed">
+          Replaced in-memory token map with durable SQLite WAL-mode prepared statements. Handling connection pool recycling and mutex locking for concurrent edge runtimes.
+        </p>
+</div>
+<!-- Tool call invocation chip -->
+<div class="flex items-center justify-between p-2 rounded bg-surface-container-highest/60 border border-outline-variant text-label-sm font-label-sm font-code-sm">
+<div class="flex items-center space-x-1.5 truncate">
+<span class="text-primary-container font-semibold">tool:</span>
+<span class="text-primary font-mono truncate">write_file</span>
+<span class="text-outline truncate">src/auth/session.ts</span>
+</div>
+<span class="text-outline shrink-0 ml-1">sync_fs</span>
+</div>
+<!-- SECURITY APPROVAL INTERCEPT BANNER (Critical Action) -->
+<div class="rounded border-2 border-primary-container bg-surface-container p-3 space-y-2.5 shadow-lg shadow-primary-container/5">
+<div class="flex items-start justify-between gap-2">
+<div class="flex items-center space-x-1.5">
+<span class="material-symbols-outlined text-primary-container text-base" data-icon="security">security</span>
+<span class="font-label-md text-label-md font-bold text-primary tracking-wide">PERMISSION APPROVAL REQUEST</span>
+</div>
+<span class="font-label-sm text-label-sm bg-surface-container-highest px-1.5 py-0.5 rounded text-secondary border border-outline-variant shrink-0">
+            LOW RISK • WORKSPACE
+          </span>
+</div>
+<p class="font-code-sm text-code-sm text-on-surface">
+          Grant file write to <code class="text-primary-container font-semibold bg-surface-container-lowest px-1 py-0.5 rounded">src/auth/session.ts</code>?
+        </p>
+<!-- Approval Actions (Large 44px min tap targets) -->
+<div class="grid grid-cols-2 gap-2 pt-1">
+<button class="h-11 flex items-center justify-center space-x-2 rounded bg-surface-container-low border border-error/50 text-error hover:bg-error-container/20 active:scale-[0.98] transition-transform font-label-md text-label-md font-semibold">
+<span class="material-symbols-outlined text-sm" data-icon="close">close</span>
+<span>Deny</span>
+</button>
+<button class="h-11 flex items-center justify-center space-x-2 rounded bg-primary-container text-on-primary-fixed hover:bg-primary-fixed active:scale-[0.98] transition-transform font-label-md text-label-md font-bold shadow-sm">
+<span class="material-symbols-outlined text-sm" data-icon="check">check</span>
+<span>Approve</span>
+</button>
+</div>
+</div>
+<!-- Mini log events -->
+<div class="space-y-1 font-code-sm text-label-sm text-outline pt-0.5">
+<div class="flex items-center space-x-1.5 truncate">
+<span class="text-primary-container">✓</span>
+<span class="truncate">Generated 42 LOC in memory buffer</span>
+</div>
+<div class="flex items-center space-x-1.5 truncate">
+<span class="text-primary-container animate-neon-pulse">›</span>
+<span class="text-on-surface-variant truncate">Checking syntax via TypeScript AST validator...</span>
+</div>
+</div>
+</section>
+<!-- 4. LIVE TOOL CALL & TERMINAL DRAWER (Collapsible PTY) -->
+<section class="bg-surface-container-low border border-outline-variant rounded p-3">
+<div class="flex items-center justify-between pb-2 border-b border-outline-variant/60">
+<div class="flex items-center space-x-1.5">
+<span class="material-symbols-outlined text-primary-container text-sm" data-icon="terminal">terminal</span>
+<h2 class="font-label-md text-label-md text-primary font-semibold tracking-wide uppercase">Interactive Output &amp; Subprocess (PTY)</h2>
+</div>
+<div class="flex items-center space-x-1">
+<button class="w-6 h-6 flex items-center justify-center rounded text-outline hover:text-primary transition-colors" title="Clear output">
+<span class="material-symbols-outlined text-xs" data-icon="delete_sweep">delete_sweep</span>
+</button>
+<button class="w-6 h-6 flex items-center justify-center rounded text-outline hover:text-primary transition-colors" title="Copy terminal log">
+<span class="material-symbols-outlined text-xs" data-icon="content_copy">content_copy</span>
+</button>
+<button class="w-6 h-6 flex items-center justify-center rounded text-outline hover:text-primary transition-colors" title="Expand terminal">
+<span class="material-symbols-outlined text-xs" data-icon="open_in_full">open_in_full</span>
+</button>
+</div>
+</div>
+<!-- Monospace terminal log pane -->
+<div class="mt-2 bg-surface-container-lowest p-2.5 rounded border border-outline-variant font-code-sm text-code-sm text-on-surface-variant overflow-x-auto leading-relaxed">
+<div class="text-outline flex items-center space-x-1">
+<span class="text-primary-container font-bold">[agent:se]</span>
+<span class="text-primary">&gt;</span>
+<span>bunx ts-node --check src/auth/session.ts</span>
+</div>
+<div class="text-secondary pl-2 border-l border-outline-variant/60 my-0.5">
+          [info] SQLite pragmas: WAL=1, busy_timeout=5000, foreign_keys=ON
+        </div>
+<div class="text-primary-container font-semibold flex items-center space-x-1.5 animate-neon-pulse">
+<span>›</span>
+<span>[agent:se] Pending user approval for filesystem write...</span>
+</div>
+<div class="text-outline text-label-sm font-label-sm mt-1">
+          Press 'Approve' above or run `/permit --all` to whitelist tool session.
+        </div>
+</div>
+</section>
+</main>
+<!-- ================= BOTTOM NAVIGATION BAR (Shared Component Execution) ================= -->
+<!-- style_shell_layout: "fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-2 py-2" -->
+<!-- style_active_navigation: "flex flex-col items-center justify-center text-primary-container dark:text-primary-container font-medium" -->
+<!-- style_inactive_navigation: "flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant" -->
+<!-- Mapping active tab: Screen subject is Agent Swarm Loop -> Destination = "Agents" -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-2 py-2 bg-surface-container-low border-t border-outline-variant pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+<!-- Item 1: Chat -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors duration-150 active:scale-[0.96] min-w-[56px] py-1" href="#chat">
+<span class="material-symbols-outlined" data-icon="chat">chat</span>
+<span class="font-label-sm text-label-sm mt-0.5">Chat</span>
+</a>
+<!-- Item 2: Projects (from label_texts: Projects) -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors duration-150 active:scale-[0.96] min-w-[56px] py-1" href="#projects">
+<span class="material-symbols-outlined" data-icon="folder">folder</span>
+<span class="font-label-sm text-label-sm mt-0.5">Projects</span>
+</a>
+<!-- Item 3: Agents (ACTIVE DESTINATION) -->
+<a class="flex flex-col items-center justify-center text-primary-container font-medium hover:text-primary transition-colors duration-150 active:scale-[0.96] min-w-[56px] py-1 relative" href="#agents">
+<span class="absolute -top-2 w-8 h-0.5 bg-primary-container rounded-full"></span>
+<span class="material-symbols-outlined text-primary-container" data-icon="smart_toy" data-weight="fill" style="font-variation-settings: 'FILL' 1;">smart_toy</span>
+<span class="font-label-sm text-label-sm mt-0.5 text-primary-container font-semibold">Agents</span>
+</a>
+<!-- Item 4: Terminal -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors duration-150 active:scale-[0.96] min-w-[56px] py-1" href="#terminal">
+<span class="material-symbols-outlined" data-icon="code">code</span>
+<span class="font-label-sm text-label-sm mt-0.5">Terminal</span>
+</a>
+<!-- Item 5: Settings -->
+<a class="flex flex-col items-center justify-center text-on-surface-variant hover:text-primary transition-colors duration-150 active:scale-[0.96] min-w-[56px] py-1" href="#settings">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label-sm text-label-sm mt-0.5">Settings</span>
+</a>
+</nav>
+<script>
+    // Lightweight touch feedback micro-interaction for mobile developer actions
+    document.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('touchstart', () => {}, {passive: true});
+    });
+  </script>
+</body></html>

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Facet 1: Top-Right Crisp Highlight -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M262,84 L348,162 L275,152 Z" />
+
+    <!-- Facet 2: Upper-Left Medium -->
+    <path
+        android:fillColor="#B3FFFFFF"
+        android:pathData="M254,84 L267,154 L211,284 L169,162 Z" />
+
+    <!-- Facet 3: Main Right Silver -->
+    <path
+        android:fillColor="#E6FFFFFF"
+        android:pathData="M274,160 L350,171 L301,357 L215,289 Z" />
+
+    <!-- Facet 4: Far-Left Deep -->
+    <path
+        android:fillColor="#66FFFFFF"
+        android:pathData="M166,174 L207,292 L166,362 Z" />
+
+    <!-- Facet 5: Bottom-Left -->
+    <path
+        android:fillColor="#80FFFFFF"
+        android:pathData="M169,370 L209,299 L244,427 Z" />
+
+    <!-- Facet 6: Bottom-Right -->
+    <path
+        android:fillColor="#99FFFFFF"
+        android:pathData="M216,298 L298,363 L252,428 Z" />
+
+    <!-- Terminal Cursor Underscore -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M332,334 H416 V360 H332 Z" />
+</vector>

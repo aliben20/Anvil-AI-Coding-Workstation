@@ -1,0 +1,41 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <!-- Facet 1: Top-Right Crisp Off-White Highlight -->
+    <path
+        android:fillColor="#F3F4F6"
+        android:pathData="M262,84 L348,162 L275,152 Z" />
+
+    <!-- Facet 2: Upper-Left Medium Steel-Slate -->
+    <path
+        android:fillColor="#64748B"
+        android:pathData="M254,84 L267,154 L211,284 L169,162 Z" />
+
+    <!-- Facet 3: Main Right Cool Silver-Slate -->
+    <path
+        android:fillColor="#94A3B8"
+        android:pathData="M274,160 L350,171 L301,357 L215,289 Z" />
+
+    <!-- Facet 4: Far-Left Vertical Deep Slate -->
+    <path
+        android:fillColor="#3B4758"
+        android:pathData="M166,174 L207,292 L166,362 Z" />
+
+    <!-- Facet 5: Bottom-Left Dark Slate -->
+    <path
+        android:fillColor="#475569"
+        android:pathData="M169,370 L209,299 L244,427 Z" />
+
+    <!-- Facet 6: Bottom-Right Medium-Dark Slate -->
+    <path
+        android:fillColor="#5A677A"
+        android:pathData="M216,298 L298,363 L252,428 Z" />
+
+    <!-- Olive-Sage Terminal Cursor Underscore ("_") -->
+    <path
+        android:fillColor="#9EC43B"
+        android:pathData="M332,334 H416 V360 H332 Z" />
+</vector>

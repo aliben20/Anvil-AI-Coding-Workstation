@@ -1,0 +1,8 @@
+{
+  "name": "@obsidian-duet/remote-worker",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@obsidian-duet/contracts": "workspace:*"
+  }
+}

@@ -1,0 +1,62 @@
+# ==============================================================================
+# OBSIDIAN · Anvil AI Coding Workstation Git Ignore
+# ==============================================================================
+
+# Node dependencies
+node_modules/
+bun.lock
+
+# Build & bundle artifacts
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+*~
+
+# Logs and crash traces
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment secrets and credentials (NEVER COMMIT)
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.enc.json
+
+# Local workstation runtime storage & downloaded model weights
+.anvil-data/
+*.gguf
+
+# Mobile & Android build outputs
+*.apk
+*.aab
+.gradle/
+**/build/
+android-workstation/.gradle/
+android-workstation/app/build/
+
+# Temporary generated test workspaces
+workspaces/.archived-*
+workspaces/clean-test-*
+workspaces/33/
+workspaces/j-j/
+workspaces/**/.gradle/
+workspaces/**/build/
+
+# Obsidian dev vault build outputs
+dev-vault/.obsidian/plugins/obsidian-duet-agent/
+apps/obsidian-plugin/dist/
+
+# Antigravity & AI Studio local agent artifacts
+.antigravity/
+.aistudio/
