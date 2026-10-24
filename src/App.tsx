@@ -1461,6 +1461,8 @@ export function App() {
                     })
                     .catch(() => {});
                 }}
+                providers={providers}
+                onNavigateToWorkspace={(id) => setActiveWorkspaceId(id)}
               />
             </TabErrorBoundary>
           )}

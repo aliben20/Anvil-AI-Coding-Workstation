@@ -53,6 +53,7 @@ import {
   AgentProfile,
   MemoryItem,
   Conversation,
+  ProviderSummary,
 } from '../types';
 
 export interface AgentsTabProps {
@@ -81,6 +82,8 @@ export interface AgentsTabProps {
   onChangeMaxIterations?: (nextMax: number) => void;
   subagentTasks?: SubAgentTask[];
   onRefreshSubagentTasks?: () => void;
+  providers?: ProviderSummary[];
+  onNavigateToWorkspace?: (wsId: string) => void;
 }
 
 interface RoleMeta {
@@ -197,6 +200,8 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   onChangeMaxIterations,
   subagentTasks = [],
   onRefreshSubagentTasks,
+  providers = [],
+  onNavigateToWorkspace,
 }) => {
   const [subView, setSubView] = useState<'loop' | 'tasks' | 'agents' | 'memory' | 'duet'>(defaultSubView);
 
@@ -1950,7 +1955,19 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
           VIEW 5: DUET MULTI-AGENT COLLABORATION
           ========================================================================= */}
       {subView === 'duet' && (
-        <DuetAgentView activeWorkspaceId={activeWorkspaceId} />
+        <DuetAgentView
+          activeWorkspaceId={activeWorkspaceId}
+          activeConv={activeConv}
+          conversations={conversations}
+          events={events}
+          sending={sending}
+          onSendMessage={onSendMessage}
+          onStopGeneration={onStopGeneration}
+          subagentTasks={subagentTasks}
+          onSelectConversation={onSelectConversation}
+          onNavigateToWorkspace={onNavigateToWorkspace}
+          providers={providers}
+        />
       )}
 
       {/* =========================================================================
