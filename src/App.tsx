@@ -50,7 +50,6 @@ import { ToolsTab } from './components/ToolsTab';
 import { AgentsTab } from './components/AgentsTab';
 import { SkillsTab } from './components/SkillsTab';
 import { TerminalTab } from './components/TerminalTab';
-import { TestCenterTab } from './components/TestCenterTab';
 import { SettingsTab } from './components/SettingsTab';
 import { RightInspector } from './components/RightInspector';
 import { FloatingBubble } from './components/FloatingBubble';
@@ -116,7 +115,7 @@ export function App() {
   const [activeTab, setActiveTab] = useState<TabDestination>(() => {
     if (typeof window !== 'undefined') {
       const param = new URLSearchParams(window.location.search).get('tab');
-      if (param) return param as TabDestination;
+      if (param && param !== 'diagnostics') return param as TabDestination;
     }
     return 'chat';
   });
@@ -1104,7 +1103,6 @@ export function App() {
     { id: 'models', label: 'Models', icon: Cpu },
     { id: 'images', label: 'Images', icon: ImageIcon },
     { id: 'preview', label: 'Preview', icon: Eye },
-    { id: 'diagnostics', label: 'Test Center', icon: Activity },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
@@ -1312,14 +1310,13 @@ export function App() {
       <div className="flex-1 min-h-0 flex overflow-hidden relative">
         {/* Primary Viewport Area (Takes 100% space when Context is collapsed) */}
         <main className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-[#0D1117]">
-          {/* Unified Tools Hub Sub-Navigation (Tools, Skills, Workspaces, Images, Models, Preview, Test Center) */}
+          {/* Unified Tools Hub Sub-Navigation (Tools, Skills, Workspaces, Images, Models, Preview) */}
           {(activeTab === 'tools' ||
             activeTab === 'skills' ||
             activeTab === 'projects' ||
             activeTab === 'images' ||
             activeTab === 'models' ||
-            activeTab === 'preview' ||
-            activeTab === 'diagnostics') && (
+            activeTab === 'preview') && (
             <div className="px-3 sm:px-5 py-2 border-b border-[#30363D] bg-[#161B22] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
               {[
                 { id: 'tools' as TabDestination, label: 'Tools', icon: Code2 },
@@ -1328,7 +1325,6 @@ export function App() {
                 { id: 'images' as TabDestination, label: 'Images', icon: ImageIcon },
                 { id: 'models' as TabDestination, label: 'Models', icon: Cpu },
                 { id: 'preview' as TabDestination, label: 'Preview', icon: Eye },
-                { id: 'diagnostics' as TabDestination, label: 'Test Center', icon: Activity },
               ].map((hubItem) => {
                 const HubIcon = hubItem.icon;
                 const isHubActive = activeTab === hubItem.id;
@@ -1572,15 +1568,6 @@ export function App() {
             </TabErrorBoundary>
           )}
 
-          {activeTab === 'diagnostics' && (
-            <TabErrorBoundary>
-              <TestCenterTab
-                activeWorkspaceId={activeWorkspaceId}
-                onNavigateTab={(t) => setActiveTab(t as TabDestination)}
-              />
-            </TabErrorBoundary>
-          )}
-
           {(activeTab === 'settings' || activeTab === 'providers') && (
             <SettingsTab
               providers={providers}
@@ -1599,7 +1586,6 @@ export function App() {
               workspaces={workspaces}
               floatingBubbleEnabled={floatingBubbleEnabled}
               onToggleFloatingBubble={handleToggleFloatingBubble}
-              onOpenDiagnostics={() => setActiveTab('diagnostics')}
               onOpenEnvironment={() => setShowEnvironmentModal(true)}
             />
           )}

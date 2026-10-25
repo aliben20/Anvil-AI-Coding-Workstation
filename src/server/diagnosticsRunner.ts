@@ -211,7 +211,7 @@ export class DiagnosticsRunner {
             id: 'ui-routes-manifest',
             category: 'ui-navigation',
             name: 'Primary & Tools Hub Route Bindings',
-            featureTested: 'App.tsx route table (Chat, Tools, Skills, Workspaces, Images, Models, Preview, Agents, Terminal, Test Center, Settings)',
+            featureTested: 'App.tsx route table (Chat, Tools, Skills, Workspaces, Images, Models, Preview, Agents, Terminal, Settings)',
             suggestedFix: 'Ensure all TabDestination values in src/types.ts are rendered in src/App.tsx.',
           },
           async () => {
@@ -227,7 +227,6 @@ export class DiagnosticsRunner {
               'PreviewTab',
               'AgentsTab',
               'TerminalTab',
-              'TestCenterTab',
               'SettingsTab',
             ];
             const missing = requiredComponents.filter((comp) => !content.includes(comp));

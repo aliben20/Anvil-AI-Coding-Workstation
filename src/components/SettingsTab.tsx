@@ -40,7 +40,6 @@ interface SettingsTabProps {
   workspaces?: WorkspaceSummary[];
   floatingBubbleEnabled?: boolean;
   onToggleFloatingBubble?: (enabled: boolean) => void;
-  onOpenDiagnostics?: () => void;
   onOpenEnvironment?: () => void;
 }
 
@@ -65,7 +64,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   workspaces = [],
   floatingBubbleEnabled = true,
   onToggleFloatingBubble,
-  onOpenDiagnostics,
   onOpenEnvironment,
 }) => {
   // Mobile Category Navigation: null shows the category rows matching Screen 9
@@ -1409,18 +1407,6 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     >
                       <Layers className="w-4 h-4" />
                       <span>Runtime Environment</span>
-                    </button>
-                  )}
-                  {onOpenDiagnostics && (
-                    <button
-                      type="button"
-                      onClick={onOpenDiagnostics}
-                      title="Open Full Application QA & Diagnostics Test Center"
-                      aria-label="Open Diagnostics Test Center"
-                      className="min-h-[36px] px-4 py-2 rounded-xl bg-[#C7FF65] text-[#0D1117] font-bold text-xs flex items-center gap-1.5 hover:bg-[#B8F558] transition-colors cursor-pointer shrink-0"
-                    >
-                      <ShieldCheck className="w-4 h-4" />
-                      <span>Open Test Center</span>
                     </button>
                   )}
                 </div>
