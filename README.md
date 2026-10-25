@@ -76,15 +76,6 @@ Full-fledged interactive PTY terminal sessions with ANSI colors, directory inspe
 
 ---
 
-### 📝 Obsidian Duet Agent Plugin
-Collaborative pair-programming inside Obsidian with reviewable unified note diffs, backlink graph queries, and persistent companion execution.
-
-| Desktop Obsidian Plugin | Mobile Obsidian Plugin View |
-| :---: | :---: |
-| ![Obsidian Desktop](docs/screenshots/obsidian-duet-agent-desktop.png) | ![Obsidian Mobile](docs/screenshots/obsidian-duet-agent-mobile.png) |
-
----
-
 ## 3. Mobile Workstation & Native Android App
 
 OBSIDIAN treats mobile as a first-class engineering surface, offering both a responsive mobile web interface and a production native Android app.
