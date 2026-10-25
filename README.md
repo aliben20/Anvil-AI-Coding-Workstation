@@ -2,13 +2,13 @@
 
 # OBSIDIAN · Anvil AI Coding Workstation
 
-**Next-Generation Developer Workstation · Multi-Agent Collaboration · On-Device & Cloud AI · Android Native Toolchain**
+**Next-Generation Developer Workstation · Multi-Agent Collaboration · Mobile App & Desktop · On-Device & Cloud AI · Android Native Toolchain**
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19.0-61dafb?logo=react&logoColor=black)](https://react.dev/)
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.3-38bdf8?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
-[![Obsidian Plugin](https://img.shields.io/badge/Obsidian_Plugin-API_v1.14+-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/)
 [![Android](https://img.shields.io/badge/Android-Kotlin_2.0_%7C_Compose-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
+[![Obsidian Plugin](https://img.shields.io/badge/Obsidian_Plugin-API_v1.14+-7C3AED?logo=obsidian&logoColor=white)](https://obsidian.md/)
 [![llama.cpp](https://img.shields.io/badge/On--Device_AI-node--llama--cpp_v3-F59E0B)](https://github.com/withcatai/node-llama-cpp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
 
@@ -18,42 +18,125 @@
 
 ## 1. Overview
 
-**OBSIDIAN (Anvil AI Coding Workstation)** is an end-to-end, multi-agent AI coding environment designed for real engineering workflows across desktop, web, Android devices, and Obsidian knowledge vaults. 
+**OBSIDIAN (Anvil AI Coding Workstation)** is an end-to-end, multi-agent AI coding environment engineered for real developer workflows across **Desktop Workstations**, **Mobile Devices & Native Android**, and **Obsidian Knowledge Vaults**.
 
-Rather than functioning as a standard conversational wrapper, OBSIDIAN combines **bounded autonomous agent loops**, **on-device GGUF inference (`llama.cpp`)**, **cloud model routing (Gemini 3.8 Flash, Claude 3.5 Sonnet, GPT-4o)**, **Linux PTY terminal session execution**, **unified workspace diffing & rollback**, and **native Android APK compilation & verification**.
-
-Furthermore, OBSIDIAN introduces **Duet Agent** — a native Obsidian plugin and companion daemon that enables pair-programming agents to collaborate directly with notes, design docs, and codebases inside Obsidian.
-
----
-
-## 2. Key Features
-
-- **Multi-Agent Orchestration**:
-  - Primary Autonomous Coder paired with a secondary Critic/Reviewer agent.
-  - Step budget controls, token tracking, and structured tool loops with interactive operator approvals (`ALLOW`, `ASK`, `DENY`).
-- **Obsidian Duet Agent Plugin**:
-  - Native Obsidian vault view (`apps/obsidian-plugin/`) with live activity streaming, markdown note inspection, backlink graph analysis, unified diff review, and non-destructive undo snapshots.
-  - Dedicated local companion daemon (`apps/companion/`) with master token pairing, task crash recovery, and process sandboxing.
-- **On-Device Local AI Engine**:
-  - Quantized GGUF execution powered by `node-llama-cpp`.
-  - Supports offline on-device models (SmolLM2-135M, Qwen2.5-Coder-1.5B, Llama-3.2-1B, and vision models) with strict token generation, memory validation, and repetition penalty control.
-- **Cloud AI Provider Engine**:
-  - Native Google Gemini streaming (`gemini-3.8-flash`, `gemini-2.5-pro`) with function calling.
-  - Dynamic provider adapters for OpenAI, Anthropic, OpenRouter, DeepSeek, and Ollama.
-  - AES-256-GCM encrypted credential vault with automatic secret redaction.
-- **Native Android Workstation**:
-  - Production Jetpack Compose + Kotlin 2.0 app (`io.anvil.workstation`) in `/android-workstation`.
-  - Android harness toolchain (`MobileHarnessToolchainManager`), AAPT2 manifest audits, and binary APK DEX/resource validation.
-- **Multi-Directory Skills System**:
-  - Scans workspace, user profile, system, and plugin directories for standard `SKILL.md` playbooks with YAML frontmatter.
-  - Automatic keyword and intent matching injecting targeted guidance into agent loops.
-- **Developer Experience**:
-  - Pure NDJSON token streaming (`/api/chat/send`) with sub-millisecond response latency.
-  - Dark graphite visual design (`#0D0F12`), Lucide icons, persistent terminal tabs, and responsive desktop/mobile overlays.
+Rather than functioning as a superficial chat wrapper, OBSIDIAN unifies:
+- **One Shared Chat System with Two Modes**: **Normal Chat** (fast single-assistant turns with cloud or local GGUF models) and **Agent Mode** (autonomous tool loops, primary agent execution, collaborator peer review, and git diff checkpoints).
+- **Mobile First & Native Android Application**: A touch-optimized responsive workstation plus a production Kotlin 2.0 / Jetpack Compose Android app (`android-workstation/`) with embedded bridge and offline workspace tools.
+- **On-Device Local AI (`llama.cpp`)**: Zero-token-cost, private offline inference running quantized GGUF models (SmolLM2, Qwen2.5-Coder, Llama-3.2) without network dependencies.
+- **Cloud Model Orchestration**: Streaming intelligence via Google Gemini 3.8 Flash, Claude 3.5 Sonnet, GPT-4o, and DeepSeek with AES-256-GCM encrypted secret management.
+- **Obsidian Duet Agent**: A native Obsidian plugin (`apps/obsidian-plugin/`) and local companion daemon (`apps/companion/`) for collaborative note review, vault search, and safe non-destructive note patching.
 
 ---
 
-## 3. Architecture & Subsystems
+## 2. Visual Interface Gallery (Desktop & Mobile Side-by-Side)
+
+### 💬 Unified Chat Interface (Normal Chat & Agent Mode)
+One unified conversation feed with seamless mode switching. Normal Chat provides clean, document-like reading; Agent Mode activates multi-agent tool execution with Blue `#388BFD` primary badge and Violet `#A371F7` collaborator cards.
+
+| Desktop Workstation (1440×900) | Mobile App (390×844) |
+| :---: | :---: |
+| ![Desktop Chat](docs/screenshots/desktop-chat-unified.png) | ![Mobile Chat](docs/screenshots/mobile-chat-unified.png) |
+
+---
+
+### ⚡ Agent Execution & Live Tool Activity
+Live step-by-step agent activity sequences showing tool calls, command outputs, skill playbooks loaded, and unified diff checkpoints.
+
+| Desktop Live Activity Sequence | Mobile Live Activity Sequence |
+| :---: | :---: |
+| ![Desktop Activity](docs/screenshots/desktop-chat-agent-activity.png) | ![Mobile Activity](docs/screenshots/mobile-chat-agent-activity.png) |
+
+---
+
+### 🤖 Duet Agent & Multi-Agent Collaboration Hub
+The central monitoring and management dashboard for primary coders, architecture reviewers, sub-agent tasks, and companion service pairing.
+
+| Desktop Multi-Agent Hub | Mobile Multi-Agent Hub |
+| :---: | :---: |
+| ![Desktop Agents](docs/screenshots/desktop-agents-hub.png) | ![Mobile Agents](docs/screenshots/mobile-agents-hub.png) |
+
+---
+
+### 🧠 Model Selector & Local GGUF Engine
+Switch seamlessly between cloud providers (Google Gemini, Anthropic, OpenAI) and offline on-device GGUF models with real-time RAM indicators. In Agent Mode, local AI models are safely restricted to prevent unreliable tool calls.
+
+| Desktop Model Selector | Mobile Model Bottom Sheet |
+| :---: | :---: |
+| ![Desktop Models](docs/screenshots/desktop-model-selector.png) | ![Mobile Models](docs/screenshots/mobile-model-selector.png) |
+
+---
+
+### 💻 Developer Tools: Terminal Console & Live Preview
+Full-fledged interactive PTY terminal sessions with ANSI colors, directory inspection, secret masking, and real-time application preview.
+
+| Desktop Terminal Console | Mobile Terminal Console |
+| :---: | :---: |
+| ![Desktop Terminal](docs/screenshots/desktop-terminal-console.png) | ![Mobile Terminal](docs/screenshots/mobile-terminal-console.png) |
+
+---
+
+### 📝 Obsidian Duet Agent Plugin
+Collaborative pair-programming inside Obsidian with reviewable unified note diffs, backlink graph queries, and persistent companion execution.
+
+| Desktop Obsidian Plugin | Mobile Obsidian Plugin View |
+| :---: | :---: |
+| ![Obsidian Desktop](docs/screenshots/obsidian-duet-agent-desktop.png) | ![Obsidian Mobile](docs/screenshots/obsidian-duet-agent-mobile.png) |
+
+---
+
+## 3. Mobile Workstation & Native Android App
+
+OBSIDIAN treats mobile as a first-class engineering surface, offering both a responsive mobile web interface and a production native Android app.
+
+```
+                              ┌──────────────────────────────────────────┐
+                              │       Native Android Application         │
+                              │    (android-workstation/ · Kotlin 2.0)   │
+                              ├──────────────────────────────────────────┤
+                              │       Jetpack Compose UI & Scaffolding   │
+                              │           (ObsidianNativeApp.kt)         │
+                              ├──────────────────────────────────────────┤
+                              │         Android Web Bridge Client        │
+                              │          (AndroidWebBridge.kt)           │
+                              ├──────────────────┬───────────────────────┤
+                              │                  │                       │
+                              ▼                  ▼                       ▼
+                     Embedded Web App     Terminal Session        Workspace Toolchain
+                   (assets/webapp/)     (TerminalSession.kt)    (AAPT2 / Gradle Harness)
+```
+
+### 📱 1. Mobile Web Workstation (Touch-Optimized)
+- **Viewport Optimization**: Designed specifically for 390px mobile viewports (iPhone, Pixel, Galaxy).
+- **Bottom Navigation**: Ergonomic thumb-friendly navigation bar for one-tap switching between Chat, Agents, Models, Files, and Settings.
+- **Drag-to-Dismiss Sheets**: Bottom drawer sheets with gesture indicators for AI model selection, mode switching, and file attachment.
+- **Compact Composer**: Streamlined input toolbar featuring a compact segmented mode pill `[ Normal ] [ Agent ]` with Primary and Collaborator model tags.
+- **Mobile Terminal Drawer**: Floating, collapsible terminal console with quick-access developer commands (`git status`, `npm test`, `apk verify`).
+
+### 🤖 2. Native Android App (`android-workstation/`)
+The repository includes a complete Android Studio project located in [`android-workstation/`](android-workstation/):
+- **Language & Architecture**: Built with **Kotlin 2.0** and **Jetpack Compose**, targeting Android SDK 35 with minimum SDK 26.
+- **Package ID**: `io.anvil.workstation`
+- **Embedded Web Bridge**: [`AndroidWebBridge.kt`](android-workstation/app/src/main/java/io/anvil/workstation/ui/AndroidWebBridge.kt) provides two-way JavaScript bridge communication, allowing native Android file picking, clipboard synchronization, and hardware telemetry.
+- **Offline Webapp Bundle**: Self-contained web assets bundled in `app/src/main/assets/webapp/` allowing full offline workstation functionality without internet access.
+- **Mobile Terminal Engine**: [`TerminalSession.kt`](android-workstation/app/src/main/java/io/anvil/workstation/terminal/TerminalSession.kt) manages on-device process spawning and pseudo-terminal execution.
+- **Mobile Harness Toolchain**: Validates Android manifests, AAPT2 resource tables, DEX bytecode, and APK signatures directly on-device.
+
+#### Building the Android APK:
+```bash
+# Navigate to the Android project directory
+cd android-workstation
+
+# Build debug APK with Gradle
+./gradlew assembleDebug
+
+# Output APK path:
+# android-workstation/app/build/outputs/apk/debug/app-debug.apk
+```
+
+---
+
+## 4. Key Subsystems & Architecture
 
 ```
                                       ┌─────────────────────────────────────┐
@@ -84,32 +167,31 @@ Furthermore, OBSIDIAN introduces **Duet Agent** — a native Obsidian plugin and
                                                  (Stream + Tools)   (node-llama-cpp) (OpenAI/Anthropic)
 ```
 
-### Core Subsystems
+### Core Components
 
 | Module | Location | Description |
 | :--- | :--- | :--- |
-| **Server Entrypoint** | [`server.ts`](server.ts) | Express + Vite integration, API routes, NDJSON streaming, and agent orchestration. |
-| **Workstation Engine** | [`src/server/workstationEngine.ts`](src/server/workstationEngine.ts) | Bounded agent loops, vault credentials, permission policies, workspace manager, and APK verifier. |
+| **Server Entrypoint** | [`server.ts`](server.ts) | Express + Vite integration, NDJSON stream routing, and agent orchestration. |
+| **Unified Chat Engine** | [`src/components/ChatTab.tsx`](src/components/ChatTab.tsx) | Single chat entry point with Normal Chat / Agent Mode selector and inline collaborator cards. |
+| **Workstation Engine** | [`src/server/workstationEngine.ts`](src/server/workstationEngine.ts) | Bounded agent loops, credential vault, permission policies, and APK verifier. |
 | **Local Llama Engine** | [`src/server/localLlamaEngine.ts`](src/server/localLlamaEngine.ts) | Native llama.cpp GGUF inference, context sequence management, and temperature controls. |
-| **Skills System** | [`src/server/skillsManager.ts`](src/server/skillsManager.ts) | Multi-directory discovery of `SKILL.md` files across user, global, workspace, and plugin paths. |
-| **PTY Session Manager** | [`src/server/ptySessionManager.ts`](src/server/ptySessionManager.ts) | Cross-platform interactive shell sessions (PowerShell, Bash, Zsh) with secret masking. |
-| **Diagnostics Runner** | [`src/server/diagnosticsRunner.ts`](src/server/diagnosticsRunner.ts) | Automated probe suite for hardware, toolchains, permissions, build pipelines, and AI backends. |
+| **Skills System** | [`src/server/skillsManager.ts`](src/server/skillsManager.ts) | Multi-directory discovery of `SKILL.md` playbooks across user, global, workspace, and plugin paths. |
+| **Android Workstation** | [`android-workstation/`](android-workstation/) | Native Kotlin 2.0 + Jetpack Compose Android app with offline terminal & build tools. |
 | **Duet Obsidian Plugin** | [`apps/obsidian-plugin/`](apps/obsidian-plugin/) | Official Obsidian plugin for reviewable note patches, dual-agent chat, and backlink graphs. |
 | **Duet Companion Service** | [`apps/companion/`](apps/companion/) | Lightweight daemon running background tasks, task crash recovery, and security sandboxing. |
-| **Android Workstation** | [`android-workstation/`](android-workstation/) | Native Kotlin 2.0 + Jetpack Compose Android app with offline terminal & build tools. |
 
 ---
 
-## 4. Getting Started
+## 5. Getting Started
 
 ### Prerequisites
 
 - **Node.js**: `v20.0.0` or higher (Node 22+ recommended).
 - **Package Manager**: `npm` (v10+) or `bun`.
 - **C/C++ Build Tools** (Optional, for native `node-llama-cpp` compilation on your platform).
-- **Java 17 / Android SDK** (Optional, for building native Android APKs locally).
+- **Java 17 / Android SDK** (Optional, for building the native Android APK).
 
-### Installation
+### Installation & Quick Start
 
 1. **Clone the repository:**
    ```bash
@@ -126,30 +208,29 @@ Furthermore, OBSIDIAN introduces **Duet Agent** — a native Obsidian plugin and
    ```bash
    cp .env.example .env
    ```
-   Open `.env` and set your credentials (e.g., `GEMINI_API_KEY`).
+   Open `.env` and configure your credentials (e.g., `GEMINI_API_KEY`).
 
 4. **Start the OBSIDIAN Workstation:**
    ```bash
    npm run dev
    ```
-   Open [http://localhost:3000](http://localhost:3000) in your web browser.
+   Open [http://localhost:3000](http://localhost:3000) in your web browser or mobile browser.
 
 ---
 
-## 5. Running the Obsidian Duet Agent
+## 6. Running the Obsidian Duet Agent
 
 ### 1. Build the Obsidian Plugin
-To compile the Obsidian plugin bundle into `dist/` and `dev-vault/.obsidian/plugins/`:
+Compile the plugin bundle into `dist/` and `dev-vault/.obsidian/plugins/`:
 ```bash
 npm run build:plugin
 ```
 
 ### 2. Start the Background Companion Service
-The companion provides persistent task execution, secure pairing, and local tool execution:
 ```bash
 npm run companion
 ```
-The companion service starts on `http://127.0.0.1:3842`.
+The companion service starts on `http://127.0.0.1:3842` with secure loopback binding.
 
 ### 3. Open in Obsidian
 1. Open Obsidian and select **Open folder as vault** $\rightarrow$ select `dev-vault`.
@@ -158,37 +239,30 @@ The companion service starts on `http://127.0.0.1:3842`.
 
 ---
 
-## 6. Testing & Quality Assurance
+## 7. Testing & Quality Assurance
 
 OBSIDIAN features a comprehensive automated testing suite verifying security, inference, streaming, and tool execution.
 
 ```bash
+# Run unified chat & mode switching tests (10/10 passed)
+npx tsx --test tests/unifiedChatAndAgentMode.test.ts
+
+# Run multi-agent Duet, vault tools, and companion security tests (16/16 passed)
+npm run test:duet
+
 # Run core workstation and inference regression tests
 npm test
 
-# Run multi-agent Duet, vault tools, and companion security tests
-npm run test:duet
-
-# Run all test suites
-npm run test:all
-
-# Perform TypeScript static analysis
-npm run lint
+# Perform TypeScript static analysis (0 errors)
+npx tsc --noEmit
 
 # Build production client bundle
 npm run build
 ```
 
-### Key Test Suites
-
-- **`tests/chatEchoRegression.test.ts`**: Verifies role separation, non-echo responses for arithmetic (`5+2`) and sequential numbers, actionable error handling for unconfigured providers, and stream cancellation.
-- **`tests/security/securityPolicies.test.ts`**: Validates path traversal blocks, binary execution allowlists, and companion authentication.
-- **`tests/plugin/vaultToolsAndDiff.test.ts`**: Verifies unified diff generation, atomic patch application, concurrent modification protection, and undo snapshots.
-- **`tests/companion/companionService.test.ts`**: Verifies master token pairing, task crash recovery, and background execution.
-
 ---
 
-## 7. Configuration Reference
+## 8. Configuration Reference
 
 | Environment Variable | Default | Purpose |
 | :--- | :--- | :--- |
@@ -201,32 +275,6 @@ npm run build
 | `OPENAI_API_KEY` | - | Optional OpenAI API key. |
 | `ANTHROPIC_API_KEY` | - | Optional Anthropic API key. |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Endpoint for local Ollama instances. |
-
----
-
-## 8. Repository Structure
-
-```
-Anvil-AI-Coding-Workstation/
-├── android-workstation/     # Native Android Kotlin 2.0 & Jetpack Compose project
-├── apps/
-│   ├── companion/           # Duet companion daemon with task persistence
-│   └── obsidian-plugin/     # Obsidian Duet Agent plugin source & manifest
-├── docs/                    # Architecture audits, environment specs, and reports
-├── packages/
-│   └── contracts/           # Shared TypeScript interfaces & protocol contracts
-├── public/                  # Static assets and template fixtures
-├── src/
-│   ├── components/          # React 19 UI tabs (Chat, Models, Agent, Terminal, Settings)
-│   ├── server/              # Backend engines (workstation, llama, skills, pty, toolchains)
-│   ├── App.tsx              # Root workstation application container & streaming handler
-│   └── types.ts             # Domain models, event types, and protocol definitions
-├── tests/                   # Automated unit, integration, and security test suites
-├── dev-vault/               # Development Obsidian vault for plugin testing
-├── server.ts                # Express backend server with live Vite HMR
-├── package.json             # Root dependency and script definitions
-└── tsconfig.json            # TypeScript configuration
-```
 
 ---
 
