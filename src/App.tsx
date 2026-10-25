@@ -437,6 +437,20 @@ export function App() {
     return () => clearInterval(interval);
   }, [anyConvSending]);
 
+  const handleNavigateToChat = (opts?: { mode?: 'normal' | 'agent'; conversationId?: string }) => {
+    if (opts?.conversationId) {
+      setActiveConvId(opts.conversationId);
+      const target = conversations.find((c) => c.id === opts.conversationId);
+      if (target?.workspaceId) {
+        setActiveWorkspaceId(target.workspaceId);
+      }
+    }
+    if (opts?.mode && activeConv) {
+      handleUpdateConversationMeta(activeConv.id, { chatMode: opts.mode });
+    }
+    setActiveTab('chat');
+  };
+
   const handleNewConversation = async () => {
     const res = await fetch('/api/conversations', {
       method: 'POST',
@@ -466,6 +480,9 @@ export function App() {
       providerId?: string;
       modelId?: string;
       agentId?: string;
+      chatMode?: 'normal' | 'agent';
+      collaboratorModelId?: string;
+      collaboratorProviderId?: string;
     }
   ) => {
     const res = await fetch(`/api/conversations/${encodeURIComponent(convId)}`, {
@@ -523,6 +540,74 @@ export function App() {
 
     if (evt.type === 'activity' && evt.event) {
       setEvents((prev) => [evt.event, ...prev.filter((p) => p.id !== evt.event.id)].slice(0, 200));
+      return;
+    }
+
+    if (evt.type === 'collaborator_status') {
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id !== targetConvId) return c;
+          return {
+            ...c,
+            messages: c.messages.map((m) =>
+              m.id === assistantPlaceholderId
+                ? {
+                    ...m,
+                    collaboratorStreamingStatus: String(evt.statusText || 'Collaborator reviewing…'),
+                    isCollaboratorStreaming: true,
+                  }
+                : m
+            ),
+          };
+        })
+      );
+      return;
+    }
+
+    if (evt.type === 'collaborator_token') {
+      const nextCollabText = typeof evt.accumulatedText === 'string' ? evt.accumulatedText : '';
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id !== targetConvId) return c;
+          return {
+            ...c,
+            messages: c.messages.map((m) =>
+              m.id === assistantPlaceholderId
+                ? {
+                    ...m,
+                    collaboratorContent: nextCollabText,
+                    isCollaboratorStreaming: true,
+                    collaboratorStreamingStatus: 'Reviewing implementation…',
+                  }
+                : m
+            ),
+          };
+        })
+      );
+      return;
+    }
+
+    if (evt.type === 'collaborator_done') {
+      setConversations((prev) =>
+        prev.map((c) => {
+          if (c.id !== targetConvId) return c;
+          return {
+            ...c,
+            messages: c.messages.map((m) =>
+              m.id === assistantPlaceholderId
+                ? {
+                    ...m,
+                    collaboratorContent: String(evt.content || m.collaboratorContent || ''),
+                    resultSummary: typeof evt.resultSummary === 'string' ? evt.resultSummary : m.resultSummary,
+                    testStatus: evt.testStatus || m.testStatus,
+                    isCollaboratorStreaming: false,
+                    collaboratorStreamingStatus: undefined,
+                  }
+                : m
+            ),
+          };
+        })
+      );
       return;
     }
 
@@ -644,7 +729,12 @@ export function App() {
     baseText: string,
     attachedFileInfo?: { name: string; content: string } | null,
     enableAgentTools = true,
-    options?: { retryLastUserMessage?: boolean }
+    options?: {
+      retryLastUserMessage?: boolean;
+      chatMode?: 'normal' | 'agent';
+      collaboratorModelId?: string;
+      collaboratorProviderId?: string;
+    }
   ) => {
     if (!baseText.trim() && !attachedFileInfo) return;
     if (!activeConv) return;
@@ -747,6 +837,9 @@ export function App() {
           stream: true,
           retryLastUserMessage: isRetry,
           assistantMessageId: assistantPlaceholderId,
+          chatMode: options?.chatMode || (enableAgentTools ? 'agent' : 'normal'),
+          collaboratorModelId: options?.collaboratorModelId,
+          collaboratorProviderId: options?.collaboratorProviderId,
         }),
       });
 
@@ -1463,6 +1556,7 @@ export function App() {
                 }}
                 providers={providers}
                 onNavigateToWorkspace={(id) => setActiveWorkspaceId(id)}
+                onNavigateToChat={handleNavigateToChat}
               />
             </TabErrorBoundary>
           )}

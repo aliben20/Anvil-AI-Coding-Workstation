@@ -84,6 +84,7 @@ export interface AgentsTabProps {
   onRefreshSubagentTasks?: () => void;
   providers?: ProviderSummary[];
   onNavigateToWorkspace?: (wsId: string) => void;
+  onNavigateToChat?: (opts?: { mode?: 'normal' | 'agent'; conversationId?: string }) => void;
 }
 
 interface RoleMeta {
@@ -202,6 +203,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   onRefreshSubagentTasks,
   providers = [],
   onNavigateToWorkspace,
+  onNavigateToChat,
 }) => {
   const [subView, setSubView] = useState<'loop' | 'tasks' | 'agents' | 'memory' | 'duet'>(defaultSubView);
 
@@ -1967,6 +1969,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
           onSelectConversation={onSelectConversation}
           onNavigateToWorkspace={onNavigateToWorkspace}
           providers={providers}
+          onNavigateToChat={onNavigateToChat}
         />
       )}
 

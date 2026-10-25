@@ -155,6 +155,9 @@ interface ChatTabProps {
       providerId?: string;
       modelId?: string;
       agentId?: string;
+      chatMode?: 'normal' | 'agent';
+      collaboratorModelId?: string;
+      collaboratorProviderId?: string;
     }
   ) => void;
   providers: ProviderSummary[];
@@ -170,7 +173,12 @@ interface ChatTabProps {
     text: string,
     attachedFile?: { name: string; content: string } | null,
     enableAgentTools?: boolean,
-    options?: { retryLastUserMessage?: boolean }
+    options?: {
+      retryLastUserMessage?: boolean;
+      chatMode?: 'normal' | 'agent';
+      collaboratorModelId?: string;
+      collaboratorProviderId?: string;
+    }
   ) => void;
   onContinueTask: () => void;
   onRetryToolCall: (toolName: string, args: Record<string, unknown>) => Promise<void>;
@@ -601,6 +609,70 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       ? 'qwen2.5-coder-1.5b-q4_k_m.gguf'
       : activeProvider?.defaultModel || 'gemini-3.8-flash');
 
+  const currentChatMode: 'normal' | 'agent' = activeConv?.chatMode || 'normal';
+  const currentCollaboratorModelId: string = activeConv?.collaboratorModelId || 'none';
+
+  const apiBackedProviders = providers.filter(
+    (p) => p.id !== 'local-ai' && p.protocol !== 'LOCAL_EMBEDDED'
+  );
+  const apiBackedModels = apiBackedProviders.flatMap((p) =>
+    (p.cachedModels || [])
+      .filter((m) => !m.id.endsWith('.gguf'))
+      .map((m) => ({
+        id: m.id,
+        name: m.displayName || m.id,
+        providerId: p.id,
+        providerName: p.name,
+      }))
+  );
+
+  const handleSetChatMode = (mode: 'normal' | 'agent') => {
+    if (!activeConv) return;
+    if (mode === 'agent') {
+      const isLocal =
+        activeConv.providerId === 'local-ai' ||
+        (activeConv.modelId && activeConv.modelId.endsWith('.gguf'));
+      if (isLocal) {
+        // Auto-switch to first available API-backed model when switching to Agent Mode
+        const fallbackProv =
+          apiBackedProviders[0] || { id: 'antigravity', defaultModel: 'gemini-3.8-flash', cachedModels: [] };
+        const fallbackModel =
+          fallbackProv.cachedModels?.find((m) => !m.id.endsWith('.gguf'))?.id ||
+          fallbackProv.defaultModel ||
+          'gemini-3.8-flash';
+        onUpdateConversationMeta(activeConv.id, {
+          chatMode: 'agent',
+          providerId: fallbackProv.id,
+          modelId: fallbackModel,
+        });
+        return;
+      }
+    }
+    onUpdateConversationMeta(activeConv.id, { chatMode: mode });
+  };
+
+  const handleSelectCollaborator = (modelId: string) => {
+    if (!activeConv) return;
+    if (modelId === 'none') {
+      onUpdateConversationMeta(activeConv.id, {
+        collaboratorModelId: 'none',
+        collaboratorProviderId: undefined,
+      });
+      return;
+    }
+    const found = apiBackedModels.find((m) => m.id === modelId);
+    onUpdateConversationMeta(activeConv.id, {
+      collaboratorModelId: modelId,
+      collaboratorProviderId: found?.providerId || 'antigravity',
+    });
+  };
+
+  useEffect(() => {
+    if (currentChatMode === 'agent' && modelSelectorTab === 'local') {
+      setModelSelectorTab('antigravity');
+    }
+  }, [currentChatMode, modelSelectorTab]);
+
   const currentLocalModel = isCurrentLocal
     ? localModels.find(
         (m) =>
@@ -783,13 +855,20 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     if (sending) return;
 
     // Distinguish chat vs agent mode:
-    // If activeMode is 'Code Mode' OR if the prompt explicitly asks for building or workspace actions
-    const hasCodeIntent = /\b(build|apk|gradle|compile|test|edit|write|create|delete|fix|run|inspect|setup)\b/i.test(text);
-    const useAgentTools = activeMode === 'Code Mode' || hasCodeIntent;
+    // Normal Chat disables agent tools for pure conversation; Agent Mode enables tools and orchestration
+    const isAgent = currentChatMode === 'agent';
+    const useAgentTools = isAgent;
 
     isNearBottomRef.current = true;
     setShowScrollToBottom(false);
-    onSendMessage(text, attachedFileInfo, useAgentTools, options);
+    onSendMessage(text, attachedFileInfo, useAgentTools, {
+      ...options,
+      chatMode: currentChatMode,
+      collaboratorModelId:
+        isAgent && currentCollaboratorModelId !== 'none' ? currentCollaboratorModelId : undefined,
+      collaboratorProviderId:
+        isAgent && currentCollaboratorModelId !== 'none' ? activeConv?.collaboratorProviderId : undefined,
+    });
 
     if (!overridePrompt) {
       setPromptInput('');
@@ -916,143 +995,129 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               <Paperclip className="w-4 h-4" />
             </button>
 
-            {/* Model Selector Pill */}
-            <div className="relative shrink-0">
+            {/* Mode Selector Segmented Toggle: [ Normal Chat ] [ Agent Mode ] */}
+            <div
+              className="flex items-center p-0.5 rounded-lg bg-[#0D1117] border border-[#30363D] shrink-0"
+              data-testid="composer-chat-mode-toggle"
+            >
               <button
                 type="button"
-                onClick={() => {
-                  setShowModelDropdown((v) => !v);
-                  setShowModeDropdown(false);
-                  if (activeConv?.providerId === 'local-ai') {
-                    setModelSelectorTab('local');
-                  } else if (activeConv?.providerId === 'antigravity') {
-                    setModelSelectorTab('antigravity');
-                  }
-                }}
-                className={`px-2.5 py-1 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors shrink-0 max-w-[150px] sm:max-w-[260px] cursor-pointer ${
-                  isCurrentLocal
-                    ? 'bg-[#1C2128] border-[#C7FF65]/40 text-[#C7FF65] hover:bg-[#21262D]'
-                    : isCurrentAntigravity
-                    ? 'bg-[#1C2128] border-[#58A6FF]/40 text-[#58A6FF] hover:bg-[#21262D]'
-                    : 'bg-[#21262D] hover:bg-[#30363D] border-[#30363D] text-[#F0F6FC]'
+                onClick={() => handleSetChatMode('normal')}
+                className={`px-2 py-0.5 sm:px-2.5 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                  currentChatMode === 'normal'
+                    ? 'bg-[#21262D] text-[#F0F6FC] font-semibold shadow-xs'
+                    : 'text-[#8B949E] hover:text-[#F0F6FC]'
                 }`}
-                title={`Active: ${currentModelName} (${isCurrentLocal ? 'On-Device Local AI' : isCurrentAntigravity ? 'Antigravity Local Host' : activeProvider?.name || 'Cloud'})`}
-                aria-label={`Select AI Model: ${currentModelName}`}
+                title="Normal Chat: Single assistant, standard responses without tools"
               >
-                {isCurrentLocal ? (
-                  <HardDrive className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
-                ) : isCurrentAntigravity ? (
-                  <Sparkles className="w-3.5 h-3.5 text-[#58A6FF] shrink-0" />
-                ) : (
-                  <Cpu className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
-                )}
-                <span className="truncate">
-                  {currentModelName}
-                </span>
-                {isCurrentLocal ? (
-                  <span className="hidden sm:inline-block px-1 py-0.2 rounded text-[10px] bg-[#C7FF65]/20 text-[#C7FF65] font-semibold">
-                    Local
-                  </span>
-                ) : isCurrentAntigravity ? (
-                  <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] bg-[#58A6FF]/20 text-[#58A6FF] font-semibold">
-                    Antigravity
-                  </span>
-                ) : null}
-                <ChevronDown className="w-3 h-3 text-[#8B949E] shrink-0" />
+                Normal Chat
               </button>
-            </div>
-
-            {/* Mode Selector Pill */}
-            <div className="relative">
               <button
                 type="button"
-                onClick={() => {
-                  setShowModeDropdown((v) => !v);
-                  setShowModelDropdown(false);
-                }}
-                title="Select Interaction Mode"
-                aria-label="Select Interaction Mode"
-                className="px-2.5 py-1 rounded-lg bg-[#21262D] hover:bg-[#30363D] border border-[#30363D] text-xs font-medium text-[#F0F6FC] flex items-center gap-1.5 transition-colors shrink-0 cursor-pointer"
+                onClick={() => handleSetChatMode('agent')}
+                className={`px-2 py-0.5 sm:px-2.5 rounded-md text-xs font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                  currentChatMode === 'agent'
+                    ? 'bg-[#C7FF65]/15 text-[#C7FF65] border border-[#C7FF65]/40 shadow-xs'
+                    : 'text-[#8B949E] hover:text-[#C7FF65]'
+                }`}
+                title="Agent Mode: Orchestrated agents with tools, collaborator review, and checkpoints"
               >
-                <Layers className="w-3.5 h-3.5 text-[#8B949E] shrink-0" />
-                <span className="truncate">{activeMode.replace(' Mode', '')}</span>
-                <ChevronDown className="w-3 h-3 text-[#8B949E] shrink-0" />
+                <Sparkles className="w-3 h-3 text-[#C7FF65]" />
+                <span>Agent Mode</span>
               </button>
-
-
-              {showModeDropdown && (
-                <>
-                  {/* Mobile Slide-Up Bottom Sheet for Mode */}
-                  <div className="sm:hidden fixed inset-0 z-50 flex flex-col justify-end">
-                    <div
-                      className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-                      onClick={() => setShowModeDropdown(false)}
-                    />
-                    <div className="relative w-full bg-[#161B22] border-t border-[#30363D] rounded-t-2xl p-4 max-h-[50vh] flex flex-col z-10 safe-bottom shadow-2xl">
-                      <div className="w-10 h-1 bg-[#30363D] rounded-full mx-auto mb-3 shrink-0" />
-                      <div className="flex items-center justify-between pb-3 border-b border-[#30363D] shrink-0">
-                        <div className="flex items-center gap-2">
-                          <Layers className="w-4 h-4 text-[#C7FF65]" />
-                          <span className="text-sm font-semibold text-[#F0F6FC]">Select Mode</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setShowModeDropdown(false)}
-                          title="Close Mode Selector"
-                          aria-label="Close Mode Selector"
-                          className="p-1 rounded text-[#8B949E] hover:text-[#F0F6FC] cursor-pointer"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      <div className="py-2 space-y-1">
-                        {(['Chat Mode', 'Code Mode', 'Write Mode'] as const).map((mode) => (
-                          <button
-                            key={mode}
-                            type="button"
-                            onClick={() => {
-                              setActiveMode(mode);
-                              setShowModeDropdown(false);
-                            }}
-                            className={`w-full text-left px-3 py-2.5 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                              activeMode === mode
-                                ? 'bg-[#21262D] text-[#C7FF65] font-semibold border border-[#C7FF65]/30'
-                                : 'text-[#F0F6FC] hover:bg-[#21262D]'
-                            }`}
-                          >
-                            <span>{mode}</span>
-                            {activeMode === mode && <Check className="w-4 h-4 text-[#C7FF65] shrink-0" />}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Desktop Dropdown */}
-                  <div className="hidden sm:block absolute left-0 bottom-full mb-2 w-48 rounded-xl bg-[#161B22] border border-[#30363D] shadow-2xl p-1.5 z-50 space-y-1">
-                    {(['Chat Mode', 'Code Mode', 'Write Mode'] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => {
-                          setActiveMode(mode);
-                          setShowModeDropdown(false);
-                        }}
-                        className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors cursor-pointer ${
-                          activeMode === mode
-                            ? 'bg-[#21262D] text-[#C7FF65] font-semibold'
-                            : 'text-[#F0F6FC] hover:bg-[#21262D]'
-                        }`}
-                      >
-                        <span>{mode}</span>
-                        {activeMode === mode && <Check className="w-3.5 h-3.5 shrink-0" />}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
             </div>
+
+            {/* In Normal Chat: Standard Model Selector Pill */}
+            {currentChatMode === 'normal' ? (
+              <div className="relative shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModelDropdown((v) => !v);
+                    setShowModeDropdown(false);
+                    if (activeConv?.providerId === 'local-ai') {
+                      setModelSelectorTab('local');
+                    } else if (activeConv?.providerId === 'antigravity') {
+                      setModelSelectorTab('antigravity');
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg border text-xs font-medium flex items-center gap-1.5 transition-colors shrink-0 max-w-[150px] sm:max-w-[260px] cursor-pointer ${
+                    isCurrentLocal
+                      ? 'bg-[#1C2128] border-[#C7FF65]/40 text-[#C7FF65] hover:bg-[#21262D]'
+                      : isCurrentAntigravity
+                      ? 'bg-[#1C2128] border-[#58A6FF]/40 text-[#58A6FF] hover:bg-[#21262D]'
+                      : 'bg-[#21262D] hover:bg-[#30363D] border-[#30363D] text-[#F0F6FC]'
+                  }`}
+                  title={`Active: ${currentModelName} (${isCurrentLocal ? 'On-Device Local AI' : isCurrentAntigravity ? 'Antigravity Local Host' : activeProvider?.name || 'Cloud'})`}
+                  aria-label={`Select AI Model: ${currentModelName}`}
+                >
+                  {isCurrentLocal ? (
+                    <HardDrive className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
+                  ) : isCurrentAntigravity ? (
+                    <Sparkles className="w-3.5 h-3.5 text-[#58A6FF] shrink-0" />
+                  ) : (
+                    <Cpu className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
+                  )}
+                  <span className="truncate">{currentModelName}</span>
+                  {isCurrentLocal ? (
+                    <span className="hidden sm:inline-block px-1 py-0.2 rounded text-[10px] bg-[#C7FF65]/20 text-[#C7FF65] font-semibold">
+                      Local
+                    </span>
+                  ) : isCurrentAntigravity ? (
+                    <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] bg-[#58A6FF]/20 text-[#58A6FF] font-semibold">
+                      Antigravity
+                    </span>
+                  ) : null}
+                  <ChevronDown className="w-3 h-3 text-[#8B949E] shrink-0" />
+                </button>
+              </div>
+            ) : (
+              /* In Agent Mode: Primary Model (Blue) + Collaborator Model (Violet) */
+              <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                {/* Primary Agent Model Badge */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowModelDropdown(true);
+                    if (activeConv?.providerId === 'antigravity') {
+                      setModelSelectorTab('antigravity');
+                    } else {
+                      setModelSelectorTab('cloud');
+                    }
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-[#388BFD]/10 hover:bg-[#388BFD]/20 border border-[#388BFD]/40 text-xs font-medium text-[#58A6FF] flex items-center gap-1.5 transition-colors shrink-0 max-w-[150px] sm:max-w-[200px] cursor-pointer"
+                  title={`Primary Agent Model: ${currentModelName} (Click to change)`}
+                  aria-label={`Primary Agent Model: ${currentModelName}`}
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#58A6FF] shrink-0" />
+                  <span className="text-[10px] uppercase font-bold text-[#388BFD]">Primary:</span>
+                  <span className="truncate font-mono">{currentModelName}</span>
+                  <ChevronDown className="w-2.5 h-2.5 text-[#58A6FF] shrink-0" />
+                </button>
+
+                {/* Collaborator Agent Model Picker */}
+                <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-[#A371F7]/10 border border-[#A371F7]/30 text-xs text-[#D2A8FF] shrink-0">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#A371F7] shrink-0" />
+                  <span className="text-[10px] uppercase font-bold text-[#A371F7]">Collab:</span>
+                  <select
+                    value={currentCollaboratorModelId}
+                    onChange={(e) => handleSelectCollaborator(e.target.value)}
+                    className="bg-transparent text-xs font-mono text-[#F0F6FC] focus:outline-none cursor-pointer max-w-[120px] sm:max-w-[160px] truncate"
+                    title="Collaborator Agent Model for peer reviews"
+                    aria-label="Collaborator Agent Model"
+                  >
+                    <option value="none" className="bg-[#161B22] text-[#8B949E]">None (Solo Agent)</option>
+                    {apiBackedModels
+                      .filter((m) => m.id !== currentModelId)
+                      .map((m) => (
+                        <option key={`composer-collab-${m.providerId}-${m.id}`} value={m.id} className="bg-[#161B22] text-[#F0F6FC]">
+                          {m.name || m.id} ({m.providerName})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* Workspace File Picker Toggle */}
             <button
@@ -1168,6 +1233,17 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             </button>
           </div>
 
+          {/* Agent Mode Guidance Banner */}
+          {currentChatMode === 'agent' && (
+            <div className="mx-4 mt-3 p-2.5 rounded-xl bg-[#388BFD]/10 border border-[#388BFD]/30 flex items-center gap-2.5 text-xs text-[#58A6FF]">
+              <Sparkles className="w-4 h-4 shrink-0 text-[#58A6FF]" />
+              <div>
+                <span className="font-semibold text-[#F0F6FC]">Agent Mode is Active: </span>
+                <span>Autonomous tool execution and multi-agent orchestration require API-backed models. Local AI (GGUF) models are restricted to Normal Chat.</span>
+              </div>
+            </div>
+          )}
+
           {/* Segmented Top Tabs: Antigravity vs Local AI vs Cloud */}
           <div className="px-4 pt-3 pb-2 border-b border-[#30363D]/60 shrink-0 flex items-center gap-2">
             <button
@@ -1192,27 +1268,37 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               </span>
             </button>
 
-            <button
-              type="button"
-              onClick={() => setModelSelectorTab('local')}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                modelSelectorTab === 'local'
-                  ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm'
-                  : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#30363D]'
-              }`}
-            >
-              <HardDrive className="w-3.5 h-3.5 shrink-0" />
-              <span>Local AI (GGUF)</span>
-              <span
-                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+            {currentChatMode === 'agent' ? (
+              <div
+                title="Local AI models are not supported in Agent Mode. Switch to Normal Chat to use Local AI."
+                className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 opacity-40 cursor-not-allowed bg-[#21262D] text-[#8B949E] border border-[#30363D]"
+              >
+                <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                <span>Local AI (Disabled)</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setModelSelectorTab('local')}
+                className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
                   modelSelectorTab === 'local'
-                    ? 'bg-[#0D1117]/20 text-[#0D1117]'
-                    : 'bg-[#30363D] text-[#C7FF65]'
+                    ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm'
+                    : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#30363D]'
                 }`}
               >
-                {localModels.filter((m) => m.isDownloaded).length} Ready
-              </span>
-            </button>
+                <HardDrive className="w-3.5 h-3.5 shrink-0" />
+                <span>Local AI (GGUF)</span>
+                <span
+                  className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                    modelSelectorTab === 'local'
+                      ? 'bg-[#0D1117]/20 text-[#0D1117]'
+                      : 'bg-[#30363D] text-[#C7FF65]'
+                  }`}
+                >
+                  {localModels.filter((m) => m.isDownloaded).length} Ready
+                </span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -3235,6 +3321,38 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
               <span className="text-[#30363D] hidden sm:inline">•</span>
 
+              {/* Mode Selector Segmented Toggle in Header [ Normal Chat ] [ Agent Mode ] */}
+              <div
+                className="flex items-center p-0.5 rounded-lg bg-[#0D1117] border border-[#30363D] shrink-0"
+                data-testid="header-chat-mode-toggle"
+              >
+                <button
+                  type="button"
+                  onClick={() => handleSetChatMode('normal')}
+                  className={`px-2 py-0.5 sm:px-2.5 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
+                    currentChatMode === 'normal'
+                      ? 'bg-[#21262D] text-[#F0F6FC] font-semibold shadow-xs'
+                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
+                  }`}
+                  title="Normal Chat: Single assistant, standard responses without tools"
+                >
+                  Normal Chat
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetChatMode('agent')}
+                  className={`px-2 py-0.5 sm:px-2.5 rounded-md text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer ${
+                    currentChatMode === 'agent'
+                      ? 'bg-[#C7FF65]/15 text-[#C7FF65] border border-[#C7FF65]/40 shadow-xs'
+                      : 'text-[#8B949E] hover:text-[#C7FF65]'
+                  }`}
+                  title="Agent Mode: Autonomous orchestration with tools, collaborator review, and checkpoints"
+                >
+                  <Sparkles className="w-3 h-3 text-[#C7FF65]" />
+                  <span>Agent Mode</span>
+                </button>
+              </div>
+
               {/* 4. Active Model Pill */}
               <button
                 onClick={() => setShowModelDropdown(true)}
@@ -3250,6 +3368,29 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 <span className="truncate">{currentModelId}</span>
                 <ChevronDown className="w-2.5 h-2.5 opacity-60" />
               </button>
+
+              {/* In Agent Mode, show Collaborator selector in header */}
+              {currentChatMode === 'agent' && (
+                <div className="hidden xl:flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#1B1827] border border-[#A371F7]/40 text-[11px] text-[#D2A8FF]">
+                  <span className="text-[10px] uppercase font-bold text-[#A371F7]">Collab:</span>
+                  <select
+                    value={currentCollaboratorModelId}
+                    onChange={(e) => handleSelectCollaborator(e.target.value)}
+                    className="bg-transparent text-[11px] font-mono text-[#F0F6FC] focus:outline-none cursor-pointer max-w-[130px] truncate"
+                    title="Collaborator Agent Model"
+                    aria-label="Collaborator Agent Model"
+                  >
+                    <option value="none" className="bg-[#161B22] text-[#8B949E]">None (Solo)</option>
+                    {apiBackedModels
+                      .filter((m) => m.id !== currentModelId)
+                      .map((m) => (
+                        <option key={`hdr-collab-${m.providerId}-${m.id}`} value={m.id} className="bg-[#161B22] text-[#F0F6FC]">
+                          {m.name || m.id}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -3344,9 +3485,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
             {/* 4 Clean Feature Cards (2x2 on Mobile, 4-Col on Desktop) */}
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4 w-full text-left">
-              {/* Card 1: Chat */}
+              {/* Card 1: Chat (Normal Chat) */}
               <div
                 onClick={() => {
+                  handleSetChatMode('normal');
                   setActiveMode('Chat Mode');
                   textareaRef.current?.focus();
                 }}
@@ -3371,9 +3513,10 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 </div>
               </div>
 
-              {/* Card 2: Write */}
+              {/* Card 2: Write (Normal Chat) */}
               <div
                 onClick={() => {
+                  handleSetChatMode('normal');
                   setActiveMode('Write Mode');
                   textareaRef.current?.focus();
                 }}
@@ -3398,28 +3541,34 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 </div>
               </div>
 
-              {/* Card 3: Code */}
+              {/* Card 3: Code (Agent Mode) */}
               <div
                 onClick={() => {
+                  handleSetChatMode('agent');
                   setActiveMode('Code Mode');
                   textareaRef.current?.focus();
                 }}
-                className="group p-3 sm:p-6 rounded-xl sm:rounded-2xl bg-[#161B22] border border-[#30363D] hover:border-[#8B949E] hover:bg-[#1C2128] transition-all cursor-pointer flex flex-col justify-between min-h-[96px] sm:min-h-[170px]"
+                className="group p-3 sm:p-6 rounded-xl sm:rounded-2xl bg-[#161B22] border border-[#30363D] hover:border-[#C7FF65]/50 hover:bg-[#1C2128] transition-all cursor-pointer flex flex-col justify-between min-h-[96px] sm:min-h-[170px]"
               >
                 <div className="space-y-1.5 sm:space-y-2">
                   <div className="flex items-center justify-between">
-                    <Code2 className="w-5 h-5 sm:w-6 sm:h-6 text-[#C7FF65] sm:text-[#F0F6FC] stroke-[1.75]" />
-                    <span className="text-[#8B949E] group-hover:text-[#F0F6FC] transition-colors text-xs font-mono sm:hidden">
+                    <Code2 className="w-5 h-5 sm:w-6 sm:h-6 text-[#C7FF65] stroke-[1.75]" />
+                    <span className="text-[#8B949E] group-hover:text-[#C7FF65] transition-colors text-xs font-mono sm:hidden">
                       →
                     </span>
                   </div>
-                  <h3 className="text-sm sm:text-lg font-semibold text-[#F0F6FC]">Code</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm sm:text-lg font-semibold text-[#F0F6FC]">Code</h3>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#C7FF65]/15 text-[#C7FF65] border border-[#C7FF65]/30">
+                      Agent Mode
+                    </span>
+                  </div>
                   <p className="text-[11px] sm:text-sm text-[#8B949E] leading-tight sm:leading-relaxed line-clamp-2">
-                    Build, debug, and improve your projects.
+                    Autonomous workspace tools, multi-agent review, and git checkpoints.
                   </p>
                 </div>
                 <div className="hidden sm:block pt-3">
-                  <span className="text-[#8B949E] group-hover:text-[#F0F6FC] transition-colors text-sm font-mono">
+                  <span className="text-[#8B949E] group-hover:text-[#C7FF65] transition-colors text-sm font-mono">
                     →
                   </span>
                 </div>
@@ -3591,38 +3740,84 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                 const isCancelled = m.taskState === 'cancelled';
                 const isFailed = m.taskState === 'failed' || Boolean(m.errorExplanation);
 
-                // Assistant Message: unboxed, document-like reading surface with grouped activity sequence
+                const isAgentTurn =
+                  m.chatMode === 'agent' ||
+                  Boolean(m.collaboratorContent) ||
+                  Boolean(m.toolCalls && m.toolCalls.length > 0) ||
+                  currentChatMode === 'agent';
+
+                // Assistant Message: unboxed reading surface for normal chat, structured agent flow for agent mode
                 return (
-                  <div key={m.id} className="group my-4 sm:my-6 space-y-2.5" data-testid="assistant-message">
-                    {/* Subtle author & model indicator + live status */}
+                  <div
+                    key={m.id}
+                    className="group my-4 sm:my-6 space-y-2.5"
+                    data-testid={isAgentTurn ? 'assistant-agent-message' : 'assistant-message'}
+                  >
+                    {/* Author & model indicator + live status */}
                     <div className="flex items-center justify-between text-xs text-[#8B949E] gap-2 flex-wrap">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <div className="w-5 h-5 rounded-md bg-[#C7FF65]/10 border border-[#C7FF65]/30 flex items-center justify-center shrink-0">
-                          <ObsidianCrystalLogo withBadge={false} className="w-3 h-3" />
-                        </div>
-                        <span className="font-semibold text-[#F0F6FC] text-xs">OBSIDIAN AI</span>
-                        {(m.modelId || currentModelId) && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#161B22] border border-[#30363D] text-[#8B949E]">
-                            {m.modelId || currentModelId}
-                          </span>
+                        {isAgentTurn ? (
+                          <>
+                            <div className="w-5 h-5 rounded-md bg-[#388BFD]/15 border border-[#388BFD]/40 flex items-center justify-center text-[#58A6FF] shrink-0">
+                              <Cpu className="w-3 h-3" />
+                            </div>
+                            <span className="font-semibold text-[#58A6FF] text-xs">Primary Agent</span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#C7FF65]/12 border border-[#C7FF65]/30 text-[#C7FF65]">
+                              Agent Mode
+                            </span>
+                            {(m.modelId || currentModelId) && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#161B22] border border-[#388BFD]/30 text-[#8B949E]">
+                                {m.modelId || currentModelId}
+                              </span>
+                            )}
+                            {m.collaboratorModelId && m.collaboratorModelId !== 'none' && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#1B1827] border border-[#A371F7]/30 text-[#D2A8FF]">
+                                + Collab: {m.collaboratorModelId}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-5 h-5 rounded-md bg-[#C7FF65]/10 border border-[#C7FF65]/30 flex items-center justify-center shrink-0">
+                              <ObsidianCrystalLogo withBadge={false} className="w-3 h-3" />
+                            </div>
+                            <span className="font-semibold text-[#F0F6FC] text-xs">OBSIDIAN AI</span>
+                            {(m.modelId || currentModelId) && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#161B22] border border-[#30363D] text-[#8B949E]">
+                                {m.modelId || currentModelId}
+                              </span>
+                            )}
+                          </>
                         )}
                         {isMessageActive && (
                           <span
-                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#C7FF65]/12 border border-[#C7FF65]/35 text-[11px] font-mono text-[#C7FF65]"
+                            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-mono ${
+                              isAgentTurn
+                                ? 'bg-[#388BFD]/12 border border-[#388BFD]/35 text-[#58A6FF]'
+                                : 'bg-[#C7FF65]/12 border border-[#C7FF65]/35 text-[#C7FF65]'
+                            }`}
                             data-testid="live-status-pill"
                           >
                             <span className="inline-flex items-center gap-0.5">
-                              <span className="w-1.5 h-1.5 rounded-full bg-[#C7FF65] animate-pulse" />
                               <span
-                                className="w-1.5 h-1.5 rounded-full bg-[#C7FF65] animate-pulse"
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  isAgentTurn ? 'bg-[#58A6FF]' : 'bg-[#C7FF65]'
+                                } animate-pulse`}
+                              />
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  isAgentTurn ? 'bg-[#58A6FF]' : 'bg-[#C7FF65]'
+                                } animate-pulse`}
                                 style={{ animationDelay: '150ms' }}
                               />
                               <span
-                                className="w-1.5 h-1.5 rounded-full bg-[#C7FF65] animate-pulse"
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  isAgentTurn ? 'bg-[#58A6FF]' : 'bg-[#C7FF65]'
+                                } animate-pulse`}
                                 style={{ animationDelay: '300ms' }}
                               />
                             </span>
-                            <span>{m.streamingStatus || 'Generating response…'}</span>
+                            <span>{m.streamingStatus || (isAgentTurn ? 'Executing agent steps…' : 'Generating response…')}</span>
                           </span>
                         )}
                         {isCancelled && (
@@ -3733,6 +3928,102 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                         )}
                       </div>
                     )}
+
+                    {/* Collaborator Agent Architecture / Code Review Card */}
+                    {(m.collaboratorContent || m.isCollaboratorStreaming) && (
+                      <div
+                        className="mt-3 p-3.5 sm:p-4 rounded-xl bg-[#15121E] border border-[#A371F7]/30 space-y-2.5 shadow-sm"
+                        data-testid="collaborator-review-card"
+                      >
+                        <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                          <div className="flex items-center gap-2">
+                            <div className="w-5 h-5 rounded-md bg-[#A371F7]/20 border border-[#A371F7]/40 flex items-center justify-center text-[#D2A8FF] shrink-0">
+                              <User className="w-3 h-3" />
+                            </div>
+                            <span className="font-semibold text-[#D2A8FF]">Collaborator Review</span>
+                            {m.collaboratorModelId && (
+                              <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[#1C162E] border border-[#A371F7]/30 text-[#D2A8FF]">
+                                {m.collaboratorModelId}
+                              </span>
+                            )}
+                            {m.isCollaboratorStreaming && (
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#A371F7]/15 border border-[#A371F7]/30 text-[10px] font-mono text-[#D2A8FF]">
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#A371F7] animate-pulse" />
+                                <span>{m.collaboratorStreamingStatus || 'Collaborator reviewing…'}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {m.collaboratorContent && (
+                          <div className="text-sm leading-relaxed text-[#F0F6FC] pl-1">
+                            <ChatMarkdown
+                              content={m.collaboratorContent}
+                              onRunInTerminal={(cmd) => onNavigateToTerminal(cmd)}
+                              onOpenFileInEditor={onNavigateToProjects}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Shared Final Result Panel */}
+                    {(() => {
+                      const hasToolModifications = (m.toolCalls || []).some(
+                        (tc) =>
+                          (tc.name === 'write_file' ||
+                            tc.name === 'delete_file' ||
+                            tc.name === 'build_apk') &&
+                          (tc.status === 'succeeded' || tc.status === 'completed')
+                      );
+                      const showSharedResult = Boolean(
+                        m.resultSummary || (hasToolModifications && !isMessageActive)
+                      );
+                      if (!showSharedResult) return null;
+
+                      return (
+                        <div
+                          className="mt-3 p-3.5 sm:p-4 rounded-xl bg-[#121915] border border-[#C7FF65]/30 space-y-2 shadow-sm"
+                          data-testid="shared-agent-result-card"
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                            <div className="flex items-center gap-2">
+                              <div className="w-5 h-5 rounded-md bg-[#C7FF65]/20 border border-[#C7FF65]/40 flex items-center justify-center text-[#C7FF65] shrink-0">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                              </div>
+                              <span className="font-semibold text-[#C7FF65]">
+                                Shared Agent Result & Checkpoint
+                              </span>
+                              {m.testStatus && (
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono uppercase ${
+                                    m.testStatus === 'passed'
+                                      ? 'bg-[#238636]/20 text-[#3FB950] border border-[#238636]/40'
+                                      : 'bg-[#DA3633]/20 text-[#FF727A]'
+                                  }`}
+                                >
+                                  Tests {m.testStatus}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={onNavigateToProjects}
+                                className="px-2.5 py-1 rounded-lg bg-[#21262D] hover:bg-[#30363D] border border-[#30363D] hover:border-[#C7FF65]/40 text-[#C7FF65] text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                              >
+                                <FolderGit2 className="w-3.5 h-3.5" />
+                                <span>View Diff / Files</span>
+                              </button>
+                            </div>
+                          </div>
+                          {m.resultSummary && (
+                            <p className="text-xs text-[#E8EAED] leading-relaxed pl-1">
+                              {m.resultSummary}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
 
                     {/* Cancelled turn footer (preserves partial output + offers Retry) */}
                     {isCancelled && (

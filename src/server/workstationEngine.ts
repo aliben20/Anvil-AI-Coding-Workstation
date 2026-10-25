@@ -218,6 +218,15 @@ export interface ChatMessage {
   isStreaming?: boolean;
   errorExplanation?: string;
   failedPrompt?: string;
+  chatMode?: 'normal' | 'agent';
+  collaboratorModelId?: string;
+  collaboratorProviderId?: string;
+  collaboratorContent?: string;
+  collaboratorToolCalls?: ToolCallRecord[];
+  collaboratorStreamingStatus?: string;
+  isCollaboratorStreaming?: boolean;
+  resultSummary?: string;
+  testStatus?: 'passed' | 'failed' | 'running' | 'skipped';
 }
 
 export interface Conversation {
@@ -227,6 +236,9 @@ export interface Conversation {
   providerId: string;
   modelId: string;
   agentId?: string;
+  chatMode?: 'normal' | 'agent';
+  collaboratorModelId?: string;
+  collaboratorProviderId?: string;
   taskState?: TaskExecutionState;
   createdAtMillis: number;
   updatedAtMillis: number;

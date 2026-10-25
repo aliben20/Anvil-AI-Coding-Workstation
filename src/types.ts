@@ -169,6 +169,14 @@ export interface ChatMessage {
   isStreaming?: boolean;
   errorExplanation?: string;
   failedPrompt?: string;
+  chatMode?: 'normal' | 'agent';
+  collaboratorModelId?: string;
+  collaboratorContent?: string;
+  collaboratorToolCalls?: ToolCallRecord[];
+  collaboratorStreamingStatus?: string;
+  isCollaboratorStreaming?: boolean;
+  resultSummary?: string;
+  testStatus?: 'passed' | 'failed' | 'running' | 'skipped';
 }
 
 export type SkillScope = 'global' | 'workspace';
@@ -220,6 +228,9 @@ export interface Conversation {
   createdAtMillis: number;
   updatedAtMillis: number;
   messages: ChatMessage[];
+  chatMode?: 'normal' | 'agent';
+  collaboratorModelId?: string;
+  collaboratorProviderId?: string;
 }
 
 export interface AgentActivityEvent {
