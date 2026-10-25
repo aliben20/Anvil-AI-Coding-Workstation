@@ -32,9 +32,9 @@ Rather than functioning as a superficial chat wrapper, OBSIDIAN unifies:
 ## 2. Visual Interface Gallery (Desktop & Mobile Side-by-Side)
 
 ### 💬 Unified Chat Interface (Normal Chat & Agent Mode)
-One unified conversation feed with seamless mode switching. Normal Chat provides clean, document-like reading; Agent Mode activates multi-agent tool execution with Blue `#388BFD` primary badge and Violet `#A371F7` collaborator cards.
+One unified conversation feed with seamless mode switching. Normal Chat provides clean, document-like reading with offline local GGUF models; Agent Mode activates multi-agent tool execution with Blue `#388BFD` primary badge and Violet `#A371F7` collaborator peer-review cards.
 
-| Desktop Workstation (1440×900) | Mobile App (390×844) |
+| Desktop Workstation (1440×900) — Agent Mode with Peer Review | Mobile App (390×844) — Offline Local AI (SmolLM2 GGUF) |
 | :---: | :---: |
 | ![Desktop Chat](docs/screenshots/desktop-chat-unified.png) | ![Mobile Chat](docs/screenshots/mobile-chat-unified.png) |
 
