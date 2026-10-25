@@ -98,6 +98,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const [fontSize, setFontSize] = useState<number>(13);
   const [cursorBlink, setCursorBlink] = useState<boolean>(true);
   const [assistiveInput, setAssistiveInput] = useState<string>('');
+  const [commandHistory, setCommandHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [showMobileInputBar, setShowMobileInputBar] = useState<boolean>(true);
   const [fnMode, setFnMode] = useState<boolean>(false);
 
@@ -107,7 +109,7 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
   const eventSourceRef = useRef<EventSource | null>(null);
   const activeSessionIdRef = useRef<string>('');
   const tokenRef = useRef<string>('');
-  const assistiveInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const assistiveInputRef = useRef<HTMLInputElement | null>(null);
   const isScrolledUpRef = useRef<boolean>(false);
 
   activeSessionIdRef.current = activeSessionId;
@@ -167,6 +169,16 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     term.loadAddon(fitAddon);
     term.open(terminalContainerRef.current);
 
+    // Optimize xterm's hidden helper textarea for mobile virtual keyboards
+    const helperTextarea = terminalContainerRef.current.querySelector<HTMLTextAreaElement>('.xterm-helper-textarea');
+    if (helperTextarea) {
+      helperTextarea.setAttribute('autocapitalize', 'none');
+      helperTextarea.setAttribute('autocomplete', 'off');
+      helperTextarea.setAttribute('autocorrect', 'off');
+      helperTextarea.setAttribute('spellcheck', 'false');
+      helperTextarea.setAttribute('enterkeyhint', 'go');
+    }
+
     try {
       fitAddon.fit();
     } catch {
@@ -216,6 +228,45 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleViewportResize);
     }
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+
+    // Smooth touch gesture scrolling for mobile touchscreens
+    const termContainer = terminalContainerRef.current;
+    let touchStartY = 0;
+    let touchStartX = 0;
+    let accumulatedDeltaY = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 1) {
+        touchStartY = e.touches[0].clientY;
+        touchStartX = e.touches[0].clientX;
+        accumulatedDeltaY = 0;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length === 1 && xtermRef.current) {
+        const currentY = e.touches[0].clientY;
+        const currentX = e.touches[0].clientX;
+        const deltaY = touchStartY - currentY;
+        const deltaX = touchStartX - currentX;
+
+        if (Math.abs(deltaY) > Math.abs(deltaX)) {
+          accumulatedDeltaY += deltaY;
+          const lineHeight = Math.max(14, fontSize * 1.38);
+          const linesToScroll = Math.trunc(accumulatedDeltaY / lineHeight);
+          if (linesToScroll !== 0) {
+            xtermRef.current.scrollLines(linesToScroll);
+            accumulatedDeltaY -= linesToScroll * lineHeight;
+            touchStartY = currentY;
+          }
+        }
+      }
+    };
+
+    termContainer.addEventListener('touchstart', handleTouchStart, { passive: true });
+    termContainer.addEventListener('touchmove', handleTouchMove, { passive: true });
 
     return () => {
       onDataDisposable.dispose();
@@ -224,12 +275,16 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
       if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', handleViewportResize);
       }
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+      termContainer.removeEventListener('touchstart', handleTouchStart);
+      termContainer.removeEventListener('touchmove', handleTouchMove);
       eventSourceRef.current?.close();
       term.dispose();
       xtermRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [sendRawInput, authHeaders]);
+  }, [sendRawInput, authHeaders, fontSize]);
 
   useEffect(() => {
     if (xtermRef.current) {
@@ -537,16 +592,38 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
     }
   };
 
+  const navigateHistory = (direction: 'up' | 'down') => {
+    if (commandHistory.length === 0) return;
+    if (direction === 'up') {
+      const nextIdx = Math.min(historyIndex + 1, commandHistory.length - 1);
+      setHistoryIndex(nextIdx);
+      setAssistiveInput(commandHistory[nextIdx]);
+    } else {
+      const nextIdx = historyIndex - 1;
+      if (nextIdx < 0) {
+        setHistoryIndex(-1);
+        setAssistiveInput('');
+      } else {
+        setHistoryIndex(nextIdx);
+        setAssistiveInput(commandHistory[nextIdx]);
+      }
+    }
+  };
+
   const handleAssistiveSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeSessionId) return;
     const text = assistiveInput.trim();
     if (text) {
       sendRawInput(activeSessionId, `${text}\r\n`);
+      setCommandHistory((prev) => [text, ...prev.filter((c) => c !== text)].slice(0, 50));
+      setHistoryIndex(-1);
       setAssistiveInput('');
     } else {
       sendRawInput(activeSessionId, '\r\n');
     }
+    // Retain focus for fast serial command execution on mobile
+    assistiveInputRef.current?.focus();
   };
 
   return (
@@ -709,27 +786,25 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
 
       {/* Live Metadata Status Strip */}
       {activeSession && (
-        <div className="px-3 py-1.5 border-b border-[#272C33] bg-[#090A0C] flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-[#A0A6AF] shrink-0 min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 min-w-0 flex-1">
-            <span className="flex items-center gap-1 text-[#F4F5F6] shrink-0">
+        <div className="px-2.5 sm:px-3 py-1 sm:py-1.5 border-b border-[#272C33] bg-[#090A0C] flex items-center justify-between gap-2 text-[10px] sm:text-[11px] font-mono text-[#A0A6AF] shrink-0 overflow-x-auto no-scrollbar">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0 flex-1 truncate">
+            <span className="flex items-center gap-1 text-[#F4F5F6] shrink-0 font-semibold">
               <Cpu className="w-3 h-3 text-[#C7FF65] shrink-0" />
               <span>{activeSession.shell}</span>
             </span>
             <span className="text-[#6E7580]">·</span>
             <span className="text-[#8DA8FF] shrink-0">
-              {activeSession.transportMode === 'pty'
-                ? `PTY (${activeSession.ttyPath || '/dev/pts'})`
-                : 'OS Pipe'}
+              {activeSession.transportMode.toUpperCase()}
             </span>
             {activeSession.shellPid && (
               <>
-                <span className="text-[#6E7580]">·</span>
-                <span className="shrink-0">PID {activeSession.shellPid}</span>
+                <span className="text-[#6E7580] hidden sm:inline">·</span>
+                <span className="shrink-0 hidden sm:inline">PID {activeSession.shellPid}</span>
               </>
             )}
-            <span className="text-[#6E7580]">·</span>
+            <span className="text-[#6E7580] hidden sm:inline">·</span>
             <span
-              className="flex items-center gap-1 text-[#C7FF65] truncate min-w-0 max-w-full"
+              className="hidden sm:flex items-center gap-1 text-[#C7FF65] truncate min-w-0 max-w-full"
               title={activeSession.cwd}
             >
               <Folder className="w-3 h-3 shrink-0" />
@@ -737,12 +812,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
             </span>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-[#6E7580] tabular-nums">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+            <span className="text-[#6E7580] tabular-nums text-[10px] sm:text-[11px]">
               {activeSession.cols}×{activeSession.rows}
             </span>
             <span
-              className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+              className={`px-1.5 py-0.5 rounded text-[9.5px] sm:text-[10px] font-semibold ${
                 activeSession.status === 'running'
                   ? 'bg-[#72D9A0]/15 text-[#72D9A0] border border-[#72D9A0]/30'
                   : 'bg-[#FF727A]/15 text-[#FF727A] border border-[#FF727A]/30'
@@ -915,12 +990,12 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
         )}
       </div>
 
-      {/* Bottom Control Keys & Assistive / Mobile Multiline Input Bar */}
+      {/* Bottom Control Keys & Assistive / Mobile Input Bar */}
       {showMobileInputBar && activeSession && activeSession.status === 'running' && (
-        <div className="p-2.5 border-t border-[#272C33] bg-[#0E1013] space-y-2 shrink-0 min-w-0 max-w-full">
+        <div className="p-1.5 sm:p-2.5 border-t border-[#272C33] bg-[#0E1013] space-y-1.5 shrink-0 min-w-0 max-w-full">
           {/* Hardware Control Key Strip (Matching Screen 7 Virtual Keyboard) */}
-          <div className="flex items-center justify-between gap-1.5 overflow-x-auto max-w-full pb-0.5">
-            <div className="flex items-center gap-1.5 shrink-0">
+          <div className="flex items-center justify-between gap-1 overflow-x-auto max-w-full pb-0.5 no-scrollbar">
+            <div className="flex items-center gap-1 shrink-0">
               {(fnMode
                 ? [
                     { label: 'fn', seq: '__TOGGLE_FN__', title: 'Exit Function Keys mode', aria: 'Toggle function keys' },
@@ -934,16 +1009,16 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                     { label: 'PgDn', seq: '\x1b[6~', title: 'Send Page Down key', aria: 'Page Down key' },
                   ]
                 : [
-                    { label: '⏎ Enter', seq: '\r\n', title: 'Send Enter key', aria: 'Enter key' },
+                    { label: '⏎', seq: '\r\n', title: 'Send Enter key', aria: 'Enter key' },
                     { label: 'tab', seq: '\t', title: 'Send Tab key', aria: 'Tab key' },
                     { label: 'ESC', seq: '\x1b', title: 'Send Escape (ESC)', aria: 'Escape key' },
                     { label: 'CTRL+C', seq: '\x03', title: 'Send SIGINT (Ctrl+C)', aria: 'Control-C interrupt key' },
-                    { label: '^', seq: '\x1b[A', title: 'Arrow Up (Previous command)', aria: 'Up arrow key' },
-                    { label: 'v', seq: '\x1b[B', title: 'Arrow Down (Next command)', aria: 'Down arrow key' },
+                    { label: '^', seq: '\x1b[A', title: 'Arrow Up', aria: 'Up arrow key' },
+                    { label: 'v', seq: '\x1b[B', title: 'Arrow Down', aria: 'Down arrow key' },
                     { label: '←', seq: '\x1b[D', title: 'Arrow Left', aria: 'Left arrow key' },
                     { label: '→', seq: '\x1b[C', title: 'Arrow Right', aria: 'Right arrow key' },
                     { label: 'Clear', seq: '\x0c', title: 'Clear screen (Ctrl+L)', aria: 'Clear screen key' },
-                    { label: 'fn', seq: '__TOGGLE_FN__', title: 'Toggle Function Keys (F1-F5, Home, End, PgUp, PgDn)', aria: 'Function key' },
+                    { label: 'fn', seq: '__TOGGLE_FN__', title: 'Toggle Function Keys', aria: 'Function key' },
                   ]
               ).map((btn) => (
                 <button
@@ -959,9 +1034,8 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
                     if (btn.seq) {
                       sendRawInput(activeSession.sessionId, btn.seq);
                     }
-                    xtermRef.current?.focus();
                   }}
-                  className={`min-h-[34px] min-w-[38px] px-2.5 py-1 rounded-lg border font-mono text-xs shrink-0 transition-colors shadow-sm cursor-pointer ${
+                  className={`min-h-[30px] min-w-[34px] px-2 py-0.5 rounded-lg border font-mono text-[11px] shrink-0 transition-colors shadow-xs cursor-pointer ${
                     btn.seq === '__TOGGLE_FN__' && fnMode
                       ? 'bg-[#C7FF65] text-[#090A0C] border-[#C7FF65] font-bold'
                       : 'bg-[#161B22] hover:bg-[#21262D] border-[#30363D] active:border-[#C7FF65] text-[#F0F6FC]'
@@ -980,42 +1054,47 @@ export const TerminalTab: React.FC<TerminalTabProps> = ({
               }}
               title="Dismiss mobile keyboard without closing session"
               aria-label="Dismiss mobile keyboard"
-              className="min-h-[32px] px-2.5 py-1 rounded bg-[#14171B] hover:bg-[#1B1F24] border border-[#272C33] text-[10.5px] text-[#A0A6AF] hover:text-[#F4F5F6] flex items-center gap-1 shrink-0 whitespace-nowrap"
+              className="min-h-[30px] px-2 py-0.5 rounded bg-[#14171B] hover:bg-[#1B1F24] border border-[#272C33] text-[10px] text-[#A0A6AF] hover:text-[#F4F5F6] flex items-center gap-1 shrink-0 whitespace-nowrap ml-1 cursor-pointer"
             >
               <Keyboard className="w-3 h-3 shrink-0" />
-              <span>Dismiss Keyboard</span>
+              <span className="hidden sm:inline">Dismiss Keyboard</span>
             </button>
           </div>
 
-          {/* Direct Stdin / Multiline Command Input */}
-          <form onSubmit={handleAssistiveSubmit} className="flex items-end gap-2 min-w-0">
-            <textarea
-              ref={assistiveInputRef}
-              rows={1}
-              value={assistiveInput}
-              onChange={(e) => setAssistiveInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  if (assistiveInput) {
-                    sendRawInput(activeSession.sessionId, `${assistiveInput}\r\n`);
-                    setAssistiveInput('');
-                  } else {
-                    sendRawInput(activeSession.sessionId, '\r\n');
+          {/* Direct Stdin / Command Input with History */}
+          <form onSubmit={handleAssistiveSubmit} className="flex items-center gap-1.5 min-w-0">
+            <div className="flex-1 relative flex items-center min-w-0">
+              <input
+                ref={assistiveInputRef}
+                type="text"
+                value={assistiveInput}
+                onChange={(e) => setAssistiveInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    navigateHistory('up');
+                  } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    navigateHistory('down');
                   }
-                }
-              }}
-              placeholder="Type inside terminal above, or enter command here (Enter to send)..."
-              aria-label="Terminal command input"
-              className="flex-1 min-w-0 min-h-[36px] px-3 py-1.5 rounded bg-[#090A0C] border border-[#272C33] focus:border-[#C7FF65] font-mono text-xs text-[#F4F5F6] placeholder-[#6E7580] focus:outline-none resize-none"
-            />
+                }}
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                placeholder="Type command here (Enter / Go to send, ↑/↓ for history)..."
+                aria-label="Terminal command input"
+                className="w-full min-h-[34px] px-2.5 py-1 rounded-lg bg-[#090A0C] border border-[#272C33] focus:border-[#C7FF65] font-mono text-xs text-[#F4F5F6] placeholder-[#6E7580] focus:outline-none"
+              />
+            </div>
             <button
               type="submit"
               title="Send command to active terminal session"
               aria-label="Send command to terminal"
-              className="min-h-[36px] px-3.5 py-1.5 rounded bg-[#C7FF65] text-[#090A0C] text-xs font-semibold whitespace-nowrap hover:opacity-95 shrink-0"
+              className="min-h-[34px] px-3.5 py-1 rounded-lg bg-[#C7FF65] text-[#090A0C] text-xs font-bold whitespace-nowrap hover:bg-[#B8F558] cursor-pointer shrink-0"
             >
-              Send Command
+              Send
             </button>
           </form>
         </div>

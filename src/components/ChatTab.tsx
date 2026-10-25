@@ -377,7 +377,26 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     setSessionToDeleteId(null);
   };
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [attachedFileInfo, setAttachedFileInfo] = useState<{ name: string; content: string } | null>(null);
+  const [attachedFiles, setAttachedFiles] = useState<
+    Array<{
+      id: string;
+      name: string;
+      content: string;
+      sizeBytes?: number;
+      isImage?: boolean;
+      dataUrl?: string;
+    }>
+  >([]);
+  const [isDraggingFiles, setIsDraggingFiles] = useState<boolean>(false);
+  const attachedFileInfo =
+    attachedFiles.length > 0
+      ? {
+          name: attachedFiles.map((f) => f.name).join(', '),
+          content: attachedFiles
+            .map((f) => `[Attached File: ${f.name}]\n\`\`\`\n${f.content}\n\`\`\``)
+            .join('\n\n'),
+        }
+      : null;
   const [workspaceFiles, setWorkspaceFiles] = useState<Array<{ relativePath: string; sizeBytes: number }>>([]);
   const [showWorkspacePicker, setShowWorkspacePicker] = useState(false);
 
@@ -851,7 +870,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   ) => {
     if (e) e.preventDefault();
     const text = (overridePrompt ?? promptInput).trim();
-    if (!text && !attachedFileInfo) return;
+    if (!text && attachedFiles.length === 0) return;
     if (sending) return;
 
     // Distinguish chat vs agent mode:
@@ -872,7 +891,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
     if (!overridePrompt) {
       setPromptInput('');
-      setAttachedFileInfo(null);
+      setAttachedFiles([]);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -892,17 +911,61 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     e.target.style.height = `${Math.min(e.target.scrollHeight, 240)}px`;
   };
 
+  const processUploadedFiles = (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    if (files.length === 0) return;
+
+    for (const file of files) {
+      const isImage = file.type.startsWith('image/');
+      if (isImage) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const dataUrl = String(reader.result || '');
+          setAttachedFiles((prev) => [
+            ...prev,
+            {
+              id: `img-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              name: file.name,
+              content: `[Attached Image: ${file.name} (${file.type || 'image'}, ${(file.size / 1024).toFixed(1)} KB)]`,
+              sizeBytes: file.size,
+              isImage: true,
+              dataUrl,
+            },
+          ]);
+        };
+        reader.readAsDataURL(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const rawText = String(reader.result || '');
+          const maxLen = 40000;
+          const content =
+            rawText.length > maxLen
+              ? `${rawText.slice(0, maxLen)}\n\n[... Remaining ${rawText.length - maxLen} chars truncated for prompt safety ...]`
+              : rawText;
+          setAttachedFiles((prev) => [
+            ...prev,
+            {
+              id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              name: file.name,
+              content,
+              sizeBytes: file.size,
+              isImage: false,
+            },
+          ]);
+        };
+        reader.readAsText(file);
+      }
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleDeviceFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAttachedFileInfo({
-        name: file.name,
-        content: String(reader.result || ''),
-      });
-    };
-    reader.readAsText(file);
+    if (e.target.files) {
+      processUploadedFiles(e.target.files);
+    }
   };
 
   const handleAttachWorkspaceFile = async (relPath: string) => {
@@ -913,10 +976,16 @@ export const ChatTab: React.FC<ChatTabProps> = ({
       );
       const data = await res.json();
       if (res.ok && typeof data.content === 'string') {
-        setAttachedFileInfo({
-          name: `${activeWorkspaceId}/${relPath}`,
-          content: data.content,
-        });
+        setAttachedFiles((prev) => [
+          ...prev,
+          {
+            id: `ws-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name: `${activeWorkspaceId}/${relPath}`,
+            content: data.content,
+            sizeBytes: data.content.length,
+            isImage: false,
+          },
+        ]);
       }
     } catch {
       // ignore
@@ -941,22 +1010,59 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     >
       <form
         onSubmit={(e) => handleSubmit(e)}
-        className="w-full rounded-2xl bg-[#161B22] border border-[#30363D] hover:border-[#8B949E]/50 focus-within:border-[#8B949E] transition-all p-3 sm:p-4 shadow-2xl"
+        onDragOver={(e) => {
+          e.preventDefault();
+          setIsDraggingFiles(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          setIsDraggingFiles(false);
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setIsDraggingFiles(false);
+          if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+            processUploadedFiles(e.dataTransfer.files);
+          }
+        }}
+        className={`w-full rounded-2xl bg-[#161B22] border transition-all p-3 sm:p-4 shadow-2xl ${
+          isDraggingFiles
+            ? 'border-[#C7FF65] bg-[#161B22]/90 shadow-[0_0_15px_rgba(199,255,101,0.25)]'
+            : 'border-[#30363D] hover:border-[#8B949E]/50 focus-within:border-[#8B949E]'
+        }`}
       >
-        {/* Attached file chip */}
-        {attachedFileInfo && (
-          <div className="mb-2.5 inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[#21262D] border border-[#30363D] text-xs text-[#F0F6FC]">
-            <FileCode className="w-3.5 h-3.5 text-[#388BFD]" />
-            <span className="font-mono truncate max-w-xs">{attachedFileInfo.name}</span>
-            <button
-              type="button"
-              onClick={() => setAttachedFileInfo(null)}
-              title="Remove attached file"
-              aria-label="Remove attached file"
-              className="text-[#8B949E] hover:text-[#FF727A] ml-1 cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
+        {/* Attached files chips */}
+        {attachedFiles.length > 0 && (
+          <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+            {attachedFiles.map((file) => (
+              <div
+                key={file.id}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#21262D] border border-[#30363D] text-xs text-[#F0F6FC] max-w-full"
+              >
+                {file.isImage ? (
+                  <ImageIcon className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
+                ) : (
+                  <FileCode className="w-3.5 h-3.5 text-[#388BFD] shrink-0" />
+                )}
+                <span className="font-mono text-[11px] truncate max-w-[180px] sm:max-w-xs" title={file.name}>
+                  {file.name}
+                </span>
+                {file.sizeBytes !== undefined && (
+                  <span className="text-[10px] text-[#8B949E] font-mono">
+                    ({(file.sizeBytes / 1024).toFixed(0)}KB)
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setAttachedFiles((prev) => prev.filter((f) => f.id !== file.id))}
+                  title={`Remove ${file.name}`}
+                  aria-label={`Remove ${file.name}`}
+                  className="text-[#8B949E] hover:text-[#FF727A] ml-0.5 p-0.5 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -965,6 +1071,8 @@ export const ChatTab: React.FC<ChatTabProps> = ({
           <input
             ref={fileInputRef}
             type="file"
+            multiple
+            accept="*/*"
             onChange={handleDeviceFileSelect}
             className="hidden"
           />
@@ -973,8 +1081,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             value={promptInput}
             onChange={handleTextareaChange}
             onKeyDown={handleKeyDown}
+            onPaste={(e) => {
+              if (e.clipboardData.files && e.clipboardData.files.length > 0) {
+                e.preventDefault();
+                processUploadedFiles(e.clipboardData.files);
+              }
+            }}
             rows={isCenteredWelcome ? 2 : 2}
-            placeholder="Ask anything, describe an idea, or paste a prompt..."
+            placeholder="Ask anything, describe an idea, paste code or drop files..."
             className="w-full bg-transparent text-sm sm:text-base text-[#F0F6FC] placeholder-[#8B949E] focus:outline-none resize-none leading-relaxed py-1 min-h-[50px]"
           />
         </div>
@@ -987,9 +1101,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             {/* Attachment Button */}
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              title="Attach a file"
-              aria-label="Attach a file"
+              onClick={() => {
+                if (fileInputRef.current) {
+                  fileInputRef.current.value = '';
+                  fileInputRef.current.click();
+                }
+              }}
+              title="Attach files (click, drag & drop, or paste)"
+              aria-label="Attach files"
               className="p-1.5 rounded-lg text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#21262D] transition-colors shrink-0 cursor-pointer"
             >
               <Paperclip className="w-4 h-4" />
