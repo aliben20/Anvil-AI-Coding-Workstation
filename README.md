@@ -1,6 +1,6 @@
 <div align="center">
 
-# OBSIDIAN · Anvil AI Coding Workstation
+# OBSIDIAN 
 
 **Next-Generation Developer Workstation · Multi-Agent Collaboration · Mobile App & Desktop · On-Device & Cloud AI · Android Native Toolchain**
 
