@@ -34,6 +34,7 @@ class AndroidWebBridge(
     private val prefs = context.getSharedPreferences("obsidian_web_bridge", Context.MODE_PRIVATE)
     private val auth = AndroidKeystoreAuthManager(context)
     private val mainHandler = Handler(Looper.getMainLooper())
+    val toolchainManager = io.anvil.workstation.toolchain.AndroidToolchainManager(context)
 
     private data class StoredConversation(
         val id: String,
@@ -87,6 +88,13 @@ class AndroidWebBridge(
                 providerId = viewModel.providerId,
             )
         )
+        toolchainManager.addProgressListener { eventObj ->
+            mainHandler.post {
+                val wv = webViewProvider() ?: return@post
+                val payload = eventObj.toString().replace("\\", "\\\\").replace("'", "\\'")
+                wv.evaluateJavascript("window.__obsidianReceiveToolchainEvent && window.__obsidianReceiveToolchainEvent(JSON.parse('$payload'));", null)
+            }
+        }
     }
 
     private fun discoverLiveServer(): String? {
@@ -563,35 +571,60 @@ class AndroidWebBridge(
             }
 
             (pathOnly == "/api/toolchains" || pathOnly == "/api/toolchains/state") && method == "GET" -> {
-                val core = JSONArray().apply {
-                    put(JSONObject().apply {
-                        put("id", "android-sdk-35")
-                        put("name", "Android SDK Platform 35 (AAPT2 + D8 + apksigner)")
-                        put("category", "core")
-                        put("version", "35.0.1")
-                        put("installed", true)
-                        put("status", "installed")
-                        put("verified", true)
-                    })
-                    put(JSONObject().apply {
-                        put("id", "openjdk-17")
-                        put("name", "OpenJDK 17 Embedded Compiler")
-                        put("category", "core")
-                        put("version", "17.0.20")
-                        put("installed", true)
-                        put("status", "installed")
-                        put("verified", true)
-                    })
+                toolchainManager.probeToolchains().toString()
+            }
+
+            pathOnly == "/api/toolchains/verify" && method == "POST" -> {
+                toolchainManager.verifyAll().toString()
+            }
+
+            pathOnly == "/api/toolchains/selection" && method == "POST" -> {
+                val rawArr = body?.optJSONArray("selectedOptionalIds")
+                val list = mutableListOf<String>()
+                if (rawArr != null) {
+                    for (i in 0 until rawArr.length()) list.add(rawArr.getString(i))
                 }
-                JSONObject().apply {
-                    put("coreToolchains", core)
-                    put("optionalToolchains", JSONArray())
-                    put("toolchains", core)
-                }.toString()
+                toolchainManager.updateSelection(list).toString()
+            }
+
+            pathOnly == "/api/toolchains/install" && method == "POST" -> {
+                val rawArr = body?.optJSONArray("toolchainIds")
+                val list = mutableListOf<String>()
+                if (rawArr != null) {
+                    for (i in 0 until rawArr.length()) list.add(rawArr.getString(i))
+                }
+                val core = listOf("claude-code", "nodejs", "npm", "git")
+                val combined = (core + list).distinct()
+                toolchainManager.startInstallJob(combined).toString()
+            }
+
+            pathOnly == "/api/toolchains/cancel" && method == "POST" -> {
+                toolchainManager.cancelActiveJob().toString()
+            }
+
+            pathOnly.startsWith("/api/toolchains/") && pathOnly.endsWith("/install") && method == "POST" -> {
+                val id = pathOnly.removePrefix("/api/toolchains/").removeSuffix("/install")
+                toolchainManager.startInstallJob(listOf(id)).toString()
+            }
+
+            pathOnly.startsWith("/api/toolchains/") && pathOnly.endsWith("/update") && method == "POST" -> {
+                val id = pathOnly.removePrefix("/api/toolchains/").removeSuffix("/update")
+                toolchainManager.startInstallJob(listOf(id)).toString()
+            }
+
+            pathOnly.startsWith("/api/toolchains/") && pathOnly.endsWith("/uninstall") && method == "POST" -> {
+                val id = pathOnly.removePrefix("/api/toolchains/").removeSuffix("/uninstall")
+                toolchainManager.cancelActiveJob().toString()
             }
 
             (pathOnly == "/api/toolchains/resources" || pathOnly == "/api/toolchains/bundles") && method == "GET" -> {
-                JSONObject().put("bundles", JSONArray()).toString()
+                toolchainManager.getBundlesCatalog().toString()
+            }
+
+            pathOnly == "/api/toolchains/resources/download" && method == "POST" -> {
+                val variant = body?.optString("variant")?.takeIf { it.isNotBlank() }
+                val bundleId = body?.optString("bundleId")?.takeIf { it.isNotBlank() }
+                toolchainManager.downloadResource(variant, bundleId).toString()
             }
 
             (pathOnly == "/api/mcp" || pathOnly == "/api/mcp/servers") && method == "GET" -> {

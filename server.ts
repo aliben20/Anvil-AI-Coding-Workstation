@@ -47,6 +47,7 @@ import {
   MobileHarnessToolchainManager,
   ToolchainId,
   OptionalToolchainId,
+  ToolchainDownloadError,
 } from './src/server/toolchainManager.js';
 import { SkillsManager } from './src/server/skillsManager.js';
 import { DiagnosticsRunner, DIAGNOSTIC_CATEGORIES } from './src/server/diagnosticsRunner.js';
@@ -1640,6 +1641,13 @@ export function createApp() {
       const result = await toolchainManager.downloadRepositoryAsset({ variant, bundleId });
       res.json({ ...result, catalog: toolchainManager.getMobileHarnessResources() });
     } catch (err) {
+      if (err instanceof ToolchainDownloadError) {
+        res.status(err.httpStatus || 400).json({
+          error: err.actionableMessage,
+          diagnostic: err.toDiagnosticReport(),
+        });
+        return;
+      }
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });

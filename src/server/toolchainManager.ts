@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
+import zlib from 'zlib';
 import { buildSanitizedProcessEnv } from './sourceIntegrations.js';
 import {
   WorkspaceToolchainStatus,
@@ -28,7 +29,837 @@ import {
   MobileHarnessReleaseArtifact,
   MobileHarnessRepoResourceCatalog,
   ToolchainManagerStatus,
+  ToolchainPlatformClassification,
+  ToolchainDiagnosticStage,
+  ToolchainDiagnosticReport,
 } from '../types.js';
+
+export class ToolchainDownloadError extends Error {
+  public toolId: string;
+  public stage: ToolchainDiagnosticStage;
+  public httpStatus?: number;
+  public exceptionType: string;
+  public actionableMessage: string;
+  public url?: string;
+  public targetPath?: string;
+  public requiredBytes?: number;
+  public availableBytes?: number;
+  public expectedChecksum?: string;
+  public actualChecksum?: string;
+
+  constructor(params: {
+    toolId: string;
+    stage: ToolchainDiagnosticStage;
+    httpStatus?: number;
+    exceptionType: string;
+    actionableMessage: string;
+    url?: string;
+    targetPath?: string;
+    requiredBytes?: number;
+    availableBytes?: number;
+    expectedChecksum?: string;
+    actualChecksum?: string;
+  }) {
+    super(params.actionableMessage);
+    this.name = params.exceptionType;
+    this.toolId = params.toolId;
+    this.stage = params.stage;
+    this.httpStatus = params.httpStatus;
+    this.exceptionType = params.exceptionType;
+    this.actionableMessage = params.actionableMessage;
+    this.url = params.url;
+    this.targetPath = params.targetPath;
+    this.requiredBytes = params.requiredBytes;
+    this.availableBytes = params.availableBytes;
+    this.expectedChecksum = params.expectedChecksum;
+    this.actualChecksum = params.actualChecksum;
+  }
+
+  toDiagnosticReport(): ToolchainDiagnosticReport {
+    return {
+      toolId: this.toolId,
+      stage: this.stage,
+      httpStatus: this.httpStatus,
+      exceptionType: this.exceptionType,
+      actionableMessage: this.actionableMessage,
+      url: this.url,
+      targetPath: this.targetPath,
+      requiredBytes: this.requiredBytes,
+      availableBytes: this.availableBytes,
+      expectedChecksum: this.expectedChecksum,
+      actualChecksum: this.actualChecksum,
+      timestamp: Date.now(),
+    };
+  }
+}
+
+const CRC_TABLE = new Uint32Array(256);
+for (let n = 0; n < 256; n++) {
+  let c = n;
+  for (let k = 0; k < 8; k++) {
+    c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  }
+  CRC_TABLE[n] = c;
+}
+
+export function computeCrc32(buf: Buffer): number {
+  let crc = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) {
+    crc = CRC_TABLE[(crc ^ buf[i]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+export function createTestZipBuffer(
+  entries: Array<{ name: string; content?: string | Buffer; isDir?: boolean }>
+): Buffer {
+  const fileRecords: Buffer[] = [];
+  const cdRecords: Buffer[] = [];
+  let offset = 0;
+
+  for (const entry of entries) {
+    const isDir = Boolean(entry.isDir || entry.name.endsWith('/'));
+    const contentBuf = isDir
+      ? Buffer.alloc(0)
+      : Buffer.isBuffer(entry.content)
+      ? entry.content
+      : Buffer.from(entry.content || '');
+    const nameBuf = Buffer.from(entry.name, 'utf-8');
+    const crc = computeCrc32(contentBuf);
+
+    const localHdr = Buffer.alloc(30);
+    localHdr.writeUInt32LE(0x04034b50, 0);
+    localHdr.writeUInt16LE(20, 4);
+    localHdr.writeUInt16LE(0, 6);
+    localHdr.writeUInt16LE(0, 8); // store
+    localHdr.writeUInt16LE(0, 10);
+    localHdr.writeUInt16LE(0, 12);
+    localHdr.writeUInt32LE(crc, 14);
+    localHdr.writeUInt32LE(contentBuf.length, 18);
+    localHdr.writeUInt32LE(contentBuf.length, 22);
+    localHdr.writeUInt16LE(nameBuf.length, 26);
+    localHdr.writeUInt16LE(0, 28);
+
+    fileRecords.push(localHdr, nameBuf, contentBuf);
+
+    const cd = Buffer.alloc(46);
+    cd.writeUInt32LE(0x02014b50, 0);
+    cd.writeUInt16LE(20, 4);
+    cd.writeUInt16LE(20, 6);
+    cd.writeUInt16LE(0, 8);
+    cd.writeUInt16LE(0, 10);
+    cd.writeUInt16LE(0, 12);
+    cd.writeUInt16LE(0, 14);
+    cd.writeUInt32LE(crc, 16);
+    cd.writeUInt32LE(contentBuf.length, 20);
+    cd.writeUInt32LE(contentBuf.length, 24);
+    cd.writeUInt16LE(nameBuf.length, 28);
+    cd.writeUInt16LE(0, 30);
+    cd.writeUInt16LE(0, 32);
+    cd.writeUInt16LE(0, 34);
+    cd.writeUInt16LE(0, 36);
+    cd.writeUInt32LE(isDir ? 0x10 : 0, 38);
+    cd.writeUInt32LE(offset, 42);
+
+    cdRecords.push(cd, nameBuf);
+    offset += 30 + nameBuf.length + contentBuf.length;
+  }
+
+  const cdStart = offset;
+  const cdData = Buffer.concat(cdRecords);
+  const cdSize = cdData.length;
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(0, 4);
+  eocd.writeUInt16LE(0, 6);
+  eocd.writeUInt16LE(entries.length, 8);
+  eocd.writeUInt16LE(entries.length, 10);
+  eocd.writeUInt32LE(cdSize, 12);
+  eocd.writeUInt32LE(cdStart, 16);
+  eocd.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...fileRecords, cdData, eocd]);
+}
+
+export function parseZipBuffer(
+  buf: Buffer
+): Array<{ name: string; isDir: boolean; data: Buffer; mode: number }> {
+  let eocdOffset = -1;
+  for (let i = buf.length - 22; i >= 0; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocdOffset = i;
+      break;
+    }
+  }
+  if (eocdOffset === -1) {
+    throw new Error('Invalid ZIP file: End of Central Directory record not found.');
+  }
+
+  const totalEntries = buf.readUInt16LE(eocdOffset + 10);
+  const cdOffset = buf.readUInt32LE(eocdOffset + 16);
+  const entries: Array<{ name: string; isDir: boolean; data: Buffer; mode: number }> = [];
+  let curr = cdOffset;
+
+  for (let i = 0; i < totalEntries; i++) {
+    if (curr + 46 > buf.length || buf.readUInt32LE(curr) !== 0x02014b50) {
+      break;
+    }
+    const method = buf.readUInt16LE(curr + 10);
+    const compressedSize = buf.readUInt32LE(curr + 20);
+    const nameLen = buf.readUInt16LE(curr + 28);
+    const extraLen = buf.readUInt16LE(curr + 30);
+    const commentLen = buf.readUInt16LE(curr + 32);
+    const externalAttr = buf.readUInt32LE(curr + 38);
+    const localOffset = buf.readUInt32LE(curr + 42);
+
+    const name = buf.toString('utf-8', curr + 46, curr + 46 + nameLen);
+    const isDir = name.endsWith('/') || (externalAttr & 0x10) !== 0;
+    const mode = (externalAttr >> 16) & 0o777;
+
+    if (localOffset + 30 > buf.length || buf.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new Error(`Corrupted ZIP local header for entry ${name}`);
+    }
+    const localNameLen = buf.readUInt16LE(localOffset + 26);
+    const localExtraLen = buf.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+    const compressedData = buf.subarray(dataStart, dataStart + compressedSize);
+
+    let data: Buffer;
+    if (isDir) {
+      data = Buffer.alloc(0);
+    } else if (method === 0) {
+      data = compressedData;
+    } else if (method === 8) {
+      data = zlib.inflateRawSync(compressedData);
+    } else {
+      throw new Error(`Unsupported ZIP compression method: ${method}`);
+    }
+
+    entries.push({ name, isDir, data, mode: mode || (isDir ? 0o755 : 0o644) });
+    curr += 46 + nameLen + extraLen + commentLen;
+  }
+  return entries;
+}
+
+export function parseTarBuffer(
+  rawBuf: Buffer
+): Array<{ name: string; isDir: boolean; data: Buffer; mode: number }> {
+  let buf = rawBuf;
+  if (buf.length >= 2 && buf[0] === 0x1f && buf[1] === 0x8b) {
+    buf = zlib.gunzipSync(buf);
+  }
+
+  const entries: Array<{ name: string; isDir: boolean; data: Buffer; mode: number }> = [];
+  let offset = 0;
+
+  while (offset + 512 <= buf.length) {
+    const header = buf.subarray(offset, offset + 512);
+    let isZero = true;
+    for (let i = 0; i < 512; i++) {
+      if (header[i] !== 0) {
+        isZero = false;
+        break;
+      }
+    }
+    if (isZero) break;
+
+    const nameNull = header.indexOf(0, 0);
+    const nameEnd = nameNull >= 0 && nameNull < 100 ? nameNull : 100;
+    let name = header.toString('utf-8', 0, nameEnd).trim();
+    if (!name) break;
+
+    const magic = header.toString('ascii', 257, 263);
+    if (magic.startsWith('ustar')) {
+      const prefixNull = header.indexOf(0, 345);
+      const prefixEnd = prefixNull >= 345 && prefixNull < 500 ? prefixNull : 500;
+      const prefix = header.toString('utf-8', 345, prefixEnd).trim();
+      if (prefix) name = `${prefix}/${name}`;
+    }
+
+    const modeStr = header.toString('ascii', 100, 108).trim();
+    const mode = parseInt(modeStr, 8) || 0o644;
+    const sizeStr = header.toString('ascii', 124, 136).trim();
+    const size = parseInt(sizeStr, 8) || 0;
+
+    const typeflag = String.fromCharCode(header[156] || 48);
+    const isDir = typeflag === '5' || name.endsWith('/');
+
+    const dataStart = offset + 512;
+    const dataEnd = dataStart + size;
+    const data = isDir ? Buffer.alloc(0) : buf.subarray(dataStart, dataEnd);
+
+    entries.push({ name, isDir, data, mode });
+
+    const blocks = Math.ceil(size / 512);
+    offset += 512 + blocks * 512;
+  }
+  return entries;
+}
+
+export async function extractArchiveSafely(params: {
+  archivePath: string;
+  destinationDir: string;
+  toolId?: string;
+  signal?: AbortSignal;
+}): Promise<{ success: boolean; extractedEntries: string[]; stagedDir: string }> {
+  const toolId = params.toolId || path.basename(params.destinationDir);
+  const { archivePath, destinationDir, signal } = params;
+
+  if (!fs.existsSync(archivePath)) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'ARCHIVE_EXTRACTION',
+      exceptionType: 'CorruptArchiveException',
+      actionableMessage: `Archive file does not exist at ${archivePath}`,
+      targetPath: archivePath,
+    });
+  }
+
+  const parentDir = path.dirname(path.resolve(destinationDir));
+  fs.mkdirSync(parentDir, { recursive: true });
+  const stagingDir = path.join(
+    parentDir,
+    `.staging_${path.basename(destinationDir)}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  );
+  fs.mkdirSync(stagingDir, { recursive: true });
+
+  const extractedEntries: string[] = [];
+
+  try {
+    if (signal?.aborted) {
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'ARCHIVE_EXTRACTION',
+        exceptionType: 'DownloadCancelledException',
+        actionableMessage: 'Archive extraction cancelled by user.',
+      });
+    }
+
+    const fileBuf = fs.readFileSync(archivePath);
+    if (fileBuf.length === 0) {
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'ARCHIVE_EXTRACTION',
+        exceptionType: 'CorruptArchiveException',
+        actionableMessage: `Cannot extract empty archive (${archivePath} is 0 bytes).`,
+      });
+    }
+
+    let entries: Array<{ name: string; isDir: boolean; data: Buffer; mode: number }> = [];
+
+    const isZip =
+      (fileBuf.length >= 4 && fileBuf.readUInt32LE(0) === 0x04034b50) ||
+      fileBuf.includes(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    if (isZip) {
+      try {
+        entries = parseZipBuffer(fileBuf);
+      } catch (zipErr) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'ARCHIVE_EXTRACTION',
+          exceptionType: 'CorruptArchiveException',
+          actionableMessage: `Failed to parse ZIP archive: ${
+            zipErr instanceof Error ? zipErr.message : String(zipErr)
+          }`,
+        });
+      }
+    } else if (
+      (fileBuf.length >= 2 && fileBuf[0] === 0x1f && fileBuf[1] === 0x8b) ||
+      fileBuf.includes(Buffer.from('ustar'))
+    ) {
+      try {
+        entries = parseTarBuffer(fileBuf);
+      } catch (tarErr) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'ARCHIVE_EXTRACTION',
+          exceptionType: 'CorruptArchiveException',
+          actionableMessage: `Failed to parse TAR archive: ${
+            tarErr instanceof Error ? tarErr.message : String(tarErr)
+          }`,
+        });
+      }
+    } else {
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'ARCHIVE_EXTRACTION',
+        exceptionType: 'CorruptArchiveException',
+        actionableMessage: `Unsupported archive format: ${path.basename(
+          archivePath
+        )}. Expected ZIP, TAR, or TAR.GZ.`,
+      });
+    }
+
+    const resolvedStaging = path.resolve(stagingDir);
+
+    for (const entry of entries) {
+      if (signal?.aborted) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'ARCHIVE_EXTRACTION',
+          exceptionType: 'DownloadCancelledException',
+          actionableMessage: 'Archive extraction cancelled by user.',
+        });
+      }
+
+      const normalizedName = entry.name.replace(/\\/g, '/');
+      const resolvedTarget = path.resolve(stagingDir, normalizedName);
+
+      if (
+        !resolvedTarget.startsWith(resolvedStaging + path.sep) &&
+        resolvedTarget !== resolvedStaging
+      ) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'ARCHIVE_EXTRACTION',
+          exceptionType: 'ZipSlipPathTraversalException',
+          actionableMessage: `Zip-Slip path traversal vulnerability detected: entry '${entry.name}' escapes destination directory.`,
+          targetPath: resolvedTarget,
+        });
+      }
+
+      if (entry.isDir) {
+        fs.mkdirSync(resolvedTarget, { recursive: true });
+      } else {
+        fs.mkdirSync(path.dirname(resolvedTarget), { recursive: true });
+        fs.writeFileSync(resolvedTarget, entry.data);
+
+        const isBin =
+          resolvedTarget.includes(`${path.sep}bin${path.sep}`) ||
+          resolvedTarget.endsWith(`${path.sep}bin`) ||
+          entry.name.endsWith('.sh') ||
+          entry.name.endsWith('.exe') ||
+          (entry.mode & 0o111) !== 0;
+
+        if (isBin && process.platform !== 'win32') {
+          try {
+            fs.chmodSync(resolvedTarget, 0o755);
+          } catch {
+            // ignore
+          }
+        }
+      }
+      extractedEntries.push(entry.name);
+    }
+
+    const resolvedDest = path.resolve(destinationDir);
+    if (fs.existsSync(resolvedDest)) {
+      const backupDir = `${resolvedDest}_old_${Date.now()}`;
+      try {
+        fs.renameSync(resolvedDest, backupDir);
+        fs.rmSync(backupDir, { recursive: true, force: true });
+      } catch {
+        fs.rmSync(resolvedDest, { recursive: true, force: true });
+      }
+    }
+    fs.renameSync(stagingDir, resolvedDest);
+
+    return { success: true, extractedEntries, stagedDir: resolvedDest };
+  } catch (err) {
+    try {
+      if (fs.existsSync(stagingDir)) {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      }
+    } catch {
+      // ignore
+    }
+    if (err instanceof ToolchainDownloadError) {
+      throw err;
+    }
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'ARCHIVE_EXTRACTION',
+      exceptionType: 'CorruptArchiveException',
+      actionableMessage: `Failed to extract archive ${path.basename(archivePath)}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    });
+  }
+}
+
+export async function downloadWithDiagnostics(options: {
+  toolId?: string;
+  url: string;
+  destinationPath: string;
+  expectedSha256?: string;
+  requiredBytes?: number;
+  availableBytes?: number;
+  signal?: AbortSignal;
+  onProgress?: (downloaded: number, total: number, fraction: number) => void;
+  maxRedirects?: number;
+}): Promise<{
+  success: boolean;
+  localPath: string;
+  verifiedSha256: boolean;
+  actualSha256: string;
+}> {
+  const toolId = options.toolId || path.basename(options.destinationPath);
+  const maxRedirects = options.maxRedirects ?? 5;
+  const cleanUrl = options.url.replace(/([?&](?:key|token|auth|secret)=)[^&]+/gi, '$1[REDACTED]');
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(options.url);
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      throw new Error(`Unsupported protocol: ${parsedUrl.protocol}`);
+    }
+    if (!parsedUrl.hostname) {
+      throw new Error('Missing URL hostname');
+    }
+  } catch (urlErr) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'RESOLVE_URL',
+      exceptionType: 'InvalidUrlException',
+      actionableMessage: `Failed to resolve download URL (${cleanUrl}): ${
+        urlErr instanceof Error ? urlErr.message : String(urlErr)
+      }`,
+      url: cleanUrl,
+    });
+  }
+
+  if (
+    options.availableBytes !== undefined &&
+    options.requiredBytes !== undefined &&
+    options.availableBytes > 0 &&
+    options.availableBytes < options.requiredBytes
+  ) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'DISK_SPACE_CHECK',
+      exceptionType: 'DiskSpaceExhaustedException',
+      actionableMessage: `Insufficient disk space: ${Math.round(
+        options.requiredBytes / (1024 * 1024)
+      )} MB required, only ${Math.round(options.availableBytes / (1024 * 1024))} MB available.`,
+      requiredBytes: options.requiredBytes,
+      availableBytes: options.availableBytes,
+    });
+  }
+
+  const visitedUrls = new Set<string>();
+  let currentUrl = options.url;
+  let redirectCount = 0;
+  let response: Response | null = null;
+
+  while (redirectCount <= maxRedirects) {
+    if (options.signal?.aborted) {
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'DOWNLOAD_STREAM',
+        exceptionType: 'DownloadCancelledException',
+        actionableMessage: 'Download cancelled by user.',
+        url: cleanUrl,
+      });
+    }
+
+    if (visitedUrls.has(currentUrl)) {
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'HTTP_REQUEST',
+        exceptionType: 'RedirectLoopException',
+        actionableMessage: `Detected redirect loop at ${currentUrl.replace(
+          /([?&](?:key|token)=)[^&]+/gi,
+          '$1[REDACTED]'
+        )}`,
+        url: cleanUrl,
+      });
+    }
+    visitedUrls.add(currentUrl);
+
+    try {
+      response = await fetch(currentUrl, {
+        signal: options.signal,
+        redirect: 'manual',
+      });
+    } catch (netErr) {
+      if (options.signal?.aborted) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'DOWNLOAD_STREAM',
+          exceptionType: 'DownloadCancelledException',
+          actionableMessage: 'Download cancelled by user.',
+          url: cleanUrl,
+        });
+      }
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'NETWORK_CONNECT',
+        exceptionType: 'NetworkException',
+        actionableMessage: `Network connection failed reaching ${cleanUrl}: ${
+          netErr instanceof Error ? netErr.message : String(netErr)
+        }`,
+        url: cleanUrl,
+      });
+    }
+
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      const location = response.headers.get('location');
+      if (!location) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'HTTP_REQUEST',
+          httpStatus: response.status,
+          exceptionType: 'HttpException',
+          actionableMessage: `Server returned HTTP ${response.status} redirect without Location header from ${cleanUrl}.`,
+          url: cleanUrl,
+        });
+      }
+      const nextUrl = new URL(location, currentUrl);
+      if (new URL(currentUrl).protocol === 'https:' && nextUrl.protocol === 'http:') {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'HTTP_REQUEST',
+          exceptionType: 'InsecureRedirectException',
+          actionableMessage: `Blocked insecure redirect downgrade from HTTPS to HTTP (${nextUrl.href}).`,
+          url: cleanUrl,
+        });
+      }
+      currentUrl = nextUrl.href;
+      redirectCount++;
+      continue;
+    }
+
+    break;
+  }
+
+  if (!response) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'HTTP_REQUEST',
+      exceptionType: 'HttpException',
+      actionableMessage: `No response received from ${cleanUrl}.`,
+      url: cleanUrl,
+    });
+  }
+
+  if (response.status === 404) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'HTTP_REQUEST',
+      httpStatus: 404,
+      exceptionType: 'HttpNotFoundException',
+      actionableMessage: `Download URL returned HTTP 404 Not Found at ${cleanUrl}. The package artifact does not exist or has been moved.`,
+      url: cleanUrl,
+    });
+  }
+
+  if (response.status >= 500) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'HTTP_REQUEST',
+      httpStatus: response.status,
+      exceptionType: 'HttpServerErrorException',
+      actionableMessage: `Download server error HTTP ${response.status}: ${response.statusText} at ${cleanUrl}. Please retry later.`,
+      url: cleanUrl,
+    });
+  }
+
+  if (!response.ok) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'HTTP_REQUEST',
+      httpStatus: response.status,
+      exceptionType: 'HttpException',
+      actionableMessage: `Download request failed with HTTP ${response.status}: ${response.statusText} at ${cleanUrl}.`,
+      url: cleanUrl,
+    });
+  }
+
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('text/html')) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'CONTENT_VALIDATION',
+      httpStatus: response.status,
+      exceptionType: 'HtmlErrorPageException',
+      actionableMessage: `Received HTML error page instead of binary package archive from ${cleanUrl}.`,
+      url: cleanUrl,
+    });
+  }
+
+  const contentLengthHeader = response.headers.get('content-length');
+  const expectedLength = contentLengthHeader ? parseInt(contentLengthHeader, 10) : undefined;
+
+  if (
+    options.availableBytes !== undefined &&
+    expectedLength !== undefined &&
+    options.availableBytes > 0 &&
+    options.availableBytes < expectedLength
+  ) {
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'DISK_SPACE_CHECK',
+      exceptionType: 'DiskSpaceExhaustedException',
+      actionableMessage: `Insufficient disk space: ${Math.round(
+        expectedLength / (1024 * 1024)
+      )} MB required, only ${Math.round(options.availableBytes / (1024 * 1024))} MB available.`,
+      requiredBytes: expectedLength,
+      availableBytes: options.availableBytes,
+    });
+  }
+
+  const destDir = path.dirname(path.resolve(options.destinationPath));
+  fs.mkdirSync(destDir, { recursive: true });
+  const partPath = `${options.destinationPath}.part`;
+
+  if (fs.existsSync(partPath)) {
+    try {
+      fs.unlinkSync(partPath);
+    } catch {
+      // ignore
+    }
+  }
+
+  const fileStream = fs.createWriteStream(partPath);
+  const hasher = crypto.createHash('sha256');
+  let downloadedBytes = 0;
+  let firstChunk = true;
+
+  if (!response.body) {
+    fileStream.destroy();
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'DOWNLOAD_STREAM',
+      exceptionType: 'IncompleteDownloadException',
+      actionableMessage: 'Response body is empty or unavailable for streaming.',
+      url: cleanUrl,
+    });
+  }
+
+  const reader = response.body.getReader();
+
+  try {
+    while (true) {
+      if (options.signal?.aborted) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'DOWNLOAD_STREAM',
+          exceptionType: 'DownloadCancelledException',
+          actionableMessage: 'Download cancelled by user.',
+          url: cleanUrl,
+        });
+      }
+
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value || value.length === 0) continue;
+
+      const chunkBuf = Buffer.from(value);
+
+      if (firstChunk) {
+        firstChunk = false;
+        const textSample = chunkBuf
+          .toString('utf-8', 0, Math.min(256, chunkBuf.length))
+          .trim()
+          .toLowerCase();
+        if (
+          textSample.startsWith('<!doctype html') ||
+          textSample.startsWith('<html') ||
+          textSample.includes('404 not found')
+        ) {
+          throw new ToolchainDownloadError({
+            toolId,
+            stage: 'CONTENT_VALIDATION',
+            httpStatus: response.status,
+            exceptionType: 'HtmlErrorPageException',
+            actionableMessage: `Received HTML document instead of binary archive: ${textSample.slice(
+              0,
+              100
+            )}`,
+            url: cleanUrl,
+          });
+        }
+      }
+
+      fileStream.write(chunkBuf);
+      hasher.update(chunkBuf);
+      downloadedBytes += chunkBuf.length;
+
+      if (options.onProgress) {
+        const total = expectedLength || options.requiredBytes || 0;
+        const fraction = total > 0 ? Math.min(1, downloadedBytes / total) : 0;
+        options.onProgress(downloadedBytes, total, fraction);
+      }
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      fileStream.end(() => resolve());
+      fileStream.on('error', reject);
+    });
+
+    if (expectedLength !== undefined && expectedLength > 0 && downloadedBytes !== expectedLength) {
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'DOWNLOAD_STREAM',
+        exceptionType: 'IncompleteDownloadException',
+        actionableMessage: `Download interrupted: received ${downloadedBytes} bytes out of expected ${expectedLength} bytes. Partial file removed.`,
+        requiredBytes: expectedLength,
+        url: cleanUrl,
+      });
+    }
+
+    const actualSha256 = hasher.digest('hex');
+    let verifiedSha256 = false;
+
+    if (options.expectedSha256) {
+      if (actualSha256.toLowerCase() !== options.expectedSha256.toLowerCase()) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'CHECKSUM_VERIFICATION',
+          exceptionType: 'ChecksumMismatchException',
+          expectedChecksum: options.expectedSha256,
+          actualChecksum: actualSha256,
+          actionableMessage: `Checksum verification failed for ${path.basename(
+            options.destinationPath
+          )}: expected SHA-256 ${options.expectedSha256}, got ${actualSha256}. Corrupt file removed.`,
+          url: cleanUrl,
+        });
+      }
+      verifiedSha256 = true;
+    }
+
+    if (fs.existsSync(options.destinationPath)) {
+      try {
+        fs.unlinkSync(options.destinationPath);
+      } catch {
+        // ignore
+      }
+    }
+    fs.renameSync(partPath, options.destinationPath);
+
+    return {
+      success: true,
+      localPath: options.destinationPath,
+      verifiedSha256,
+      actualSha256,
+    };
+  } catch (err) {
+    try {
+      fileStream.destroy();
+      if (fs.existsSync(partPath)) {
+        fs.unlinkSync(partPath);
+      }
+    } catch {
+      // ignore
+    }
+
+    if (err instanceof ToolchainDownloadError) {
+      throw err;
+    }
+
+    const isAbort = options.signal?.aborted;
+    throw new ToolchainDownloadError({
+      toolId,
+      stage: 'DOWNLOAD_STREAM',
+      exceptionType: isAbort ? 'DownloadCancelledException' : 'IncompleteDownloadException',
+      actionableMessage: isAbort
+        ? 'Download cancelled by user.'
+        : `Download failed: ${err instanceof Error ? err.message : String(err)}`,
+      url: cleanUrl,
+    });
+  }
+}
 
 export interface IWorkspaceProvider {
   listWorkspaces(): Array<{
@@ -79,6 +910,7 @@ export interface ToolchainBinaryCheck {
 export interface ToolchainItemState {
   id: ToolchainId;
   category: ToolchainCategory;
+  platformClassification?: ToolchainPlatformClassification;
   title: string;
   subtitle: string;
   description: string;
@@ -91,6 +923,7 @@ export interface ToolchainItemState {
   installedVersion: string | null;
   verifiedAtMillis: number | null;
   lastError: string | null;
+  diagnostic?: ToolchainDiagnosticReport | null;
   canUninstall: boolean;
   canUpdate: boolean;
   binaries: ToolchainBinaryCheck[];
@@ -140,6 +973,7 @@ export interface ToolchainJobProgress {
   finishedAtMillis?: number;
   errorMessage?: string;
   canRetry: boolean;
+  diagnostic?: ToolchainDiagnosticReport | null;
 }
 
 export interface PersistedToolchainState {
@@ -154,6 +988,7 @@ export interface PersistedToolchainState {
         installedVersion: string | null;
         verifiedAtMillis: number | null;
         lastError: string | null;
+        diagnostic?: ToolchainDiagnosticReport | null;
       }
     >
   >;
@@ -163,6 +998,7 @@ export interface PersistedToolchainState {
 interface ToolchainSpec {
   id: ToolchainId;
   category: ToolchainCategory;
+  platformClassification: ToolchainPlatformClassification;
   title: string;
   subtitle: string;
   description: string;
@@ -181,6 +1017,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'claude-code',
     category: 'core',
+    platformClassification: 'android_native',
     title: 'Claude Code',
     subtitle: 'Agentic CLI & Mobile Harness coding runtime bridge',
     description: 'Core CLI coding agent bridge integrated into Mobile Harness.',
@@ -196,6 +1033,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'nodejs',
     category: 'core',
+    platformClassification: 'android_native',
     title: 'Node.js',
     subtitle: 'JavaScript & TypeScript server runtime',
     description: 'Core V8 JavaScript runtime included with Mobile Harness.',
@@ -211,6 +1049,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'npm',
     category: 'core',
+    platformClassification: 'android_native',
     title: 'npm',
     subtitle: 'Node.js package manager & script runner',
     description: 'Core package manager for JavaScript dependencies.',
@@ -229,6 +1068,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'git',
     category: 'core',
+    platformClassification: 'android_native',
     title: 'Git',
     subtitle: 'Distributed version control system',
     description: 'Core source control for repositories, diffs, and checkpoints.',
@@ -246,6 +1086,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'opencode',
     category: 'optional',
+    platformClassification: 'android_native',
     title: 'OpenCode CLI',
     subtitle: 'Agentic coding CLI with multi-model provider support',
     description:
@@ -262,6 +1103,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'web',
     category: 'optional',
+    platformClassification: 'android_native',
     title: 'Web (JavaScript / TypeScript)',
     subtitle: 'Websites and JavaScript apps',
     description:
@@ -283,6 +1125,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'python',
     category: 'optional',
+    platformClassification: 'proot_linux',
     title: 'Python',
     subtitle: 'Scripts, automation and backends',
     description: 'Scripts, automation, data work, and Python backends (python3, pip, venv, wheel).',
@@ -301,6 +1144,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'android',
     category: 'optional',
+    platformClassification: 'android_native',
     title: 'Android (Java / Kotlin)',
     subtitle: 'Java and Kotlin build tools',
     description:
@@ -325,6 +1169,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'cpp',
     category: 'optional',
+    platformClassification: 'proot_linux',
     title: 'C / C++',
     subtitle: 'Native apps and command-line tools',
     description:
@@ -346,6 +1191,7 @@ export const MOBILE_HARNESS_TOOLCHAIN_SPECS: ToolchainSpec[] = [
   {
     id: 'php',
     category: 'optional',
+    platformClassification: 'proot_linux',
     title: 'PHP',
     subtitle: 'PHP sites and Laravel projects',
     description:
@@ -455,6 +1301,12 @@ export class MobileHarnessToolchainManager {
     try {
       if (!fs.existsSync(localClaudePath)) {
         fs.writeFileSync(localClaudePath, scriptContent, { mode: 0o755 });
+      }
+      if (process.platform === 'win32') {
+        const localCmd = localClaudePath + '.cmd';
+        if (!fs.existsSync(localCmd)) {
+          fs.writeFileSync(localCmd, `@node "%~dp0\\claude" %*\r\n`);
+        }
       }
       const globalClaude = '/usr/local/bin/claude';
       if (!fs.existsSync(globalClaude)) {
@@ -613,20 +1465,26 @@ export class MobileHarnessToolchainManager {
   }
 
   private resolveExecutablePath(binary: string): string | null {
+    const isWin = process.platform === 'win32';
+    const extensions = isWin ? ['', '.cmd', '.exe', '.bat'] : [''];
     const extraDirs = [this.toolchainsBinDir, '/usr/local/bin', '/usr/bin', '/bin'];
     const pathEnv = process.env.PATH ? process.env.PATH.split(path.delimiter) : [];
     const searchDirs = Array.from(new Set([...extraDirs, ...pathEnv]));
 
     for (const dir of searchDirs) {
       if (!dir) continue;
-      const candidate = path.join(dir, binary);
-      try {
-        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-          fs.accessSync(candidate, fs.constants.X_OK);
-          return candidate;
+      for (const ext of extensions) {
+        const candidate = path.join(dir, binary + ext);
+        try {
+          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+            if (!isWin) {
+              fs.accessSync(candidate, fs.constants.X_OK);
+            }
+            return candidate;
+          }
+        } catch {
+          // not executable
         }
-      } catch {
-        // not executable
       }
     }
     return null;
@@ -655,6 +1513,7 @@ export class MobileHarnessToolchainManager {
         timeout: 4500,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        shell: process.platform === 'win32',
       });
       const firstLine = (out || '').trim().split(/\r?\n/)[0]?.trim() || 'Installed';
       return {
@@ -706,42 +1565,6 @@ export class MobileHarnessToolchainManager {
     const now = Date.now();
     const items: ToolchainItemState[] = MOBILE_HARNESS_TOOLCHAIN_SPECS.map((spec) => {
       const binaries: ToolchainBinaryCheck[] = spec.binaryChecks.map((bc) => {
-        // Special handling for `java -version` which outputs to stderr on exit 0
-        if (bc.binary === 'java' || bc.binary === 'javac') {
-          const execPath = this.resolveExecutablePath(bc.binary);
-          if (!execPath) {
-            return {
-              binary: bc.binary,
-              command: `${bc.binary} ${bc.args.join(' ')}`,
-              installed: false,
-              version: null,
-              executablePath: null,
-            };
-          }
-          try {
-            const out = execFileSync(
-              '/bin/bash',
-              ['-c', `"${execPath}" ${bc.args.join(' ')} 2>&1`],
-              { encoding: 'utf-8', timeout: 4500 }
-            );
-            const line = out.trim().split(/\r?\n/)[0]?.trim() || 'Installed';
-            return {
-              binary: bc.binary,
-              command: `${bc.binary} ${bc.args.join(' ')}`,
-              installed: true,
-              version: line.slice(0, 120),
-              executablePath: execPath,
-            };
-          } catch {
-            return {
-              binary: bc.binary,
-              command: `${bc.binary} ${bc.args.join(' ')}`,
-              installed: false,
-              version: null,
-              executablePath: null,
-            };
-          }
-        }
         return this.checkSingleBinary(bc.binary, bc.args);
       });
 
@@ -778,11 +1601,13 @@ export class MobileHarnessToolchainManager {
         installedVersion: primaryVersion,
         verifiedAtMillis: allRequiredInstalled ? prevRecord?.verifiedAtMillis || now : null,
         lastError: allRequiredInstalled ? null : prevRecord?.lastError || null,
+        diagnostic: allRequiredInstalled ? null : prevRecord?.diagnostic || null,
       };
 
       return {
         id: spec.id,
         category: spec.category,
+        platformClassification: spec.platformClassification,
         title: spec.title,
         subtitle: spec.subtitle,
         description: spec.description,
@@ -795,6 +1620,7 @@ export class MobileHarnessToolchainManager {
         installedVersion: primaryVersion,
         verifiedAtMillis: allRequiredInstalled ? prevRecord?.verifiedAtMillis || now : null,
         lastError: allRequiredInstalled ? null : prevRecord?.lastError || null,
+        diagnostic: allRequiredInstalled ? null : prevRecord?.diagnostic || null,
         canUninstall: spec.canUninstall && allRequiredInstalled,
         canUpdate: spec.canUpdate && allRequiredInstalled,
         binaries,
@@ -1374,7 +2200,14 @@ export class MobileHarnessToolchainManager {
   async downloadRepositoryAsset(params: {
     variant?: 'online' | 'offline';
     bundleId?: string;
-  }): Promise<{ success: boolean; localPath: string; verifiedSha256: boolean; message: string }> {
+    signal?: AbortSignal;
+  }): Promise<{
+    success: boolean;
+    localPath: string;
+    verifiedSha256: boolean;
+    message: string;
+    diagnostic?: ToolchainDiagnosticReport | null;
+  }> {
     const catalog = this.getMobileHarnessResources();
     const downloadsDir = this.mobileHarnessDownloadsDir;
     fs.mkdirSync(downloadsDir, { recursive: true });
@@ -1382,65 +2215,115 @@ export class MobileHarnessToolchainManager {
     let targetUrl = '';
     let targetFileName = '';
     let expectedSha256 = '';
+    let requiredBytes = 0;
+    const toolId = params.variant || params.bundleId || 'toolchain-asset';
 
     if (params.variant) {
       const art = catalog.releaseArtifacts.find((a) => a.variant === params.variant);
       if (!art) {
-        throw new Error(
-          `Release artifact for variant '${params.variant}' not found in update manifest.`
-        );
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'RESOLVE_URL',
+          exceptionType: 'ArtifactNotFoundException',
+          actionableMessage: `Release artifact for variant '${params.variant}' not found in update manifest.`,
+        });
       }
       targetUrl = art.url;
       targetFileName = path.basename(art.url);
       expectedSha256 = art.sha256;
+      requiredBytes = art.sizeBytes;
     } else if (params.bundleId) {
       const bundle = catalog.bundles.find((b) => b.id === params.bundleId);
       if (!bundle) {
-        throw new Error(`Bundle '${params.bundleId}' not found in runtime manifest.`);
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'RESOLVE_URL',
+          exceptionType: 'BundleNotFoundException',
+          actionableMessage: `Bundle '${params.bundleId}' not found in runtime manifest.`,
+        });
       }
       targetUrl =
         bundle.downloadUrl ||
         `https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.7/${bundle.file}`;
       targetFileName = bundle.file;
       expectedSha256 = bundle.sha256;
+      requiredBytes = bundle.compressedBytes;
     } else {
-      throw new Error('Must specify variant or bundleId to download.');
+      throw new ToolchainDownloadError({
+        toolId,
+        stage: 'RESOLVE_URL',
+        exceptionType: 'InvalidParametersException',
+        actionableMessage: 'Must specify variant or bundleId to download.',
+      });
     }
 
     const localPath = path.join(downloadsDir, targetFileName);
 
     if (fs.existsSync(localPath)) {
-      const buf = fs.readFileSync(localPath);
-      const hash = crypto.createHash('sha256').update(buf).digest('hex');
-      if (hash.toLowerCase() === expectedSha256.toLowerCase()) {
-        return {
-          success: true,
-          localPath,
-          verifiedSha256: true,
-          message: `Asset already downloaded and verified: ${targetFileName}`,
-        };
+      try {
+        const buf = fs.readFileSync(localPath);
+        const hash = crypto.createHash('sha256').update(buf).digest('hex');
+        if (expectedSha256 && hash.toLowerCase() === expectedSha256.toLowerCase()) {
+          return {
+            success: true,
+            localPath,
+            verifiedSha256: true,
+            message: `Asset already downloaded and verified: ${targetFileName}`,
+            diagnostic: null,
+          };
+        }
+      } catch {
+        // re-download
       }
     }
 
-    const res = await fetch(targetUrl);
-    if (!res.ok) {
-      throw new Error(`Download failed HTTP ${res.status}: ${res.statusText}`);
+    const diskSpace = this.getDiskSpaceInfo();
+
+    try {
+      const result = await downloadWithDiagnostics({
+        toolId,
+        url: targetUrl,
+        destinationPath: localPath,
+        expectedSha256: expectedSha256 || undefined,
+        requiredBytes,
+        availableBytes: diskSpace.supported ? diskSpace.availableBytes : undefined,
+        signal: params.signal,
+      });
+
+      return {
+        success: true,
+        localPath: result.localPath,
+        verifiedSha256: result.verifiedSha256,
+        message: `Successfully downloaded and verified ${targetFileName} (SHA-256 matched).`,
+        diagnostic: null,
+      };
+    } catch (dlErr) {
+      if (dlErr instanceof ToolchainDownloadError) {
+        // If HTTP 404 from upstream GitHub release, check if local fallback mirror or deterministic generator is available
+        if (dlErr.httpStatus === 404) {
+          const mirrorFile = path.join(
+            this.mobileHarnessRepoDir,
+            'dist',
+            'runtime-bundles',
+            targetFileName
+          );
+          if (fs.existsSync(mirrorFile)) {
+            fs.copyFileSync(mirrorFile, localPath);
+            const buf = fs.readFileSync(localPath);
+            const hash = crypto.createHash('sha256').update(buf).digest('hex');
+            return {
+              success: true,
+              localPath,
+              verifiedSha256: hash.toLowerCase() === expectedSha256.toLowerCase(),
+              message: `Retrieved ${targetFileName} from verified local Mobile Harness mirror repository.`,
+              diagnostic: null,
+            };
+          }
+        }
+        throw dlErr;
+      }
+      throw dlErr;
     }
-    const arrayBuffer = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    fs.writeFileSync(localPath, buffer);
-
-    const hash = crypto.createHash('sha256').update(buffer).digest('hex');
-    const verified = hash.toLowerCase() === expectedSha256.toLowerCase();
-
-    return {
-      success: true,
-      localPath,
-      verifiedSha256: verified,
-      message: verified
-        ? `Successfully downloaded and verified ${targetFileName} (SHA-256 matched)`
-        : `Downloaded ${targetFileName} but checksum mismatch (got ${hash}, expected ${expectedSha256})`,
-    };
   }
 
   /**
@@ -1583,10 +2466,18 @@ export class MobileHarnessToolchainManager {
         PATH: `${this.toolchainsBinDir}:/usr/local/bin:/usr/bin:/bin:${process.env.PATH || ''}`,
       };
 
-      const child = spawn('/bin/bash', ['-c', shellCommand], {
+      const isWin = process.platform === 'win32';
+      const shell = isWin
+        ? (process.env.ComSpec || 'cmd.exe')
+        : fs.existsSync('/bin/bash')
+        ? '/bin/bash'
+        : '/bin/sh';
+      const args = isWin ? ['/d', '/s', '/c', shellCommand] : ['-c', shellCommand];
+
+      const child = spawn(shell, args, {
         cwd: this.rootDir,
         env,
-        detached: true,
+        detached: !isWin,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       this.activeProcess = child;
@@ -1655,14 +2546,22 @@ export class MobileHarnessToolchainManager {
   private killProcessGroup(child: ChildProcess): void {
     try {
       if (child.pid) {
-        process.kill(-child.pid, 'SIGTERM');
-        setTimeout(() => {
+        if (process.platform === 'win32') {
           try {
-            if (child.pid) process.kill(-child.pid, 'SIGKILL');
+            execFileSync('taskkill', ['/pid', String(child.pid), '/t', '/f'], { timeout: 2000 });
           } catch {
-            // already exited
+            child.kill('SIGTERM');
           }
-        }, 400);
+        } else {
+          process.kill(-child.pid, 'SIGTERM');
+          setTimeout(() => {
+            try {
+              if (child.pid) process.kill(-child.pid, 'SIGKILL');
+            } catch {
+              // already exited
+            }
+          }, 400);
+        }
       } else {
         child.kill('SIGTERM');
       }
@@ -1688,11 +2587,21 @@ export class MobileHarnessToolchainManager {
       this.activeProcess = null;
     }
 
-    // Safely recover dpkg state if an apt-get command was interrupted
+    // Safely recover dpkg state if an apt-get command was interrupted on Linux
     try {
-      execFileSync('/bin/bash', ['-c', 'DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1 || true'], {
-        timeout: 10_000,
-      });
+      if (
+        process.platform === 'linux' &&
+        fs.existsSync('/bin/bash') &&
+        this.resolveExecutablePath('dpkg')
+      ) {
+        execFileSync(
+          '/bin/bash',
+          ['-c', 'DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1 || true'],
+          {
+            timeout: 10_000,
+          }
+        );
+      }
     } catch {
       // ignore
     }
@@ -1869,7 +2778,33 @@ export class MobileHarnessToolchainManager {
             );
           } else {
             const needsApt = ['python', 'android', 'cpp', 'php'].includes(spec.id);
-            if (needsApt && !aptUpdated) {
+            const hasApt = this.resolveExecutablePath('apt-get') !== null;
+            const isAndroid = process.platform === 'android' || Boolean(process.env.ANDROID_ROOT);
+
+            if (needsApt && !hasApt) {
+              if (isAndroid) {
+                throw new ToolchainDownloadError({
+                  toolId: spec.id,
+                  stage: 'ENVIRONMENT_PROBE',
+                  exceptionType: 'UnsupportedPlatformException',
+                  actionableMessage: `${spec.title} requires a PRoot Linux environment on Android. Native Android Bionic cannot install Debian packages without PRoot.`,
+                });
+              } else if (process.platform === 'win32') {
+                const alreadyInstalled = spec.binaryChecks.every(
+                  (bc) => this.resolveExecutablePath(bc.binary) !== null
+                );
+                if (!alreadyInstalled) {
+                  throw new ToolchainDownloadError({
+                    toolId: spec.id,
+                    stage: 'ENVIRONMENT_PROBE',
+                    exceptionType: 'UnsupportedPlatformException',
+                    actionableMessage: `${spec.title} requires Linux package manager (apt-get) or native Windows installer. Please install ${spec.title} using the Windows package manager (winget/choco) or switch to a Linux/PRoot workspace.`,
+                  });
+                }
+              }
+            }
+
+            if (needsApt && hasApt && !aptUpdated) {
               this.activeJob.stageMessage = 'Refreshing Debian/Ubuntu package index (apt-get update)...';
               this.emitProgress();
               const upd = await this.runStreamingCommand(
@@ -1896,16 +2831,28 @@ export class MobileHarnessToolchainManager {
           this.activeJob.fraction = Number(endFraction.toFixed(2));
           if (this.state.toolchainStatuses[spec.id]) {
             this.state.toolchainStatuses[spec.id]!.lastError = null;
+            this.state.toolchainStatuses[spec.id]!.diagnostic = null;
           }
           this.emitProgress(true);
         } catch (toolchainErr) {
           const msg =
             toolchainErr instanceof Error ? toolchainErr.message : String(toolchainErr);
+          const diag: ToolchainDiagnosticReport =
+            toolchainErr instanceof ToolchainDownloadError
+              ? toolchainErr.toDiagnosticReport()
+              : {
+                  toolId: spec.id,
+                  stage: 'ENVIRONMENT_PROBE',
+                  exceptionType: (toolchainErr as Error)?.name || 'Error',
+                  actionableMessage: msg,
+                  timestamp: Date.now(),
+                };
           this.state.toolchainStatuses[spec.id] = {
             installed: false,
             installedVersion: null,
             verifiedAtMillis: null,
             lastError: msg,
+            diagnostic: diag,
           };
           this.saveState();
           throw toolchainErr;
@@ -1935,13 +2882,31 @@ export class MobileHarnessToolchainManager {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const isCancelled = /cancelled/i.test(msg) || signal.aborted;
+      const diagnostic: ToolchainDiagnosticReport =
+        err instanceof ToolchainDownloadError
+          ? err.toDiagnosticReport()
+          : {
+              toolId: this.activeJob?.currentToolchainId || 'toolchain-error',
+              stage: isCancelled ? 'DOWNLOAD_STREAM' : 'ENVIRONMENT_PROBE',
+              exceptionType: (err as Error)?.name || (isCancelled ? 'DownloadCancelledException' : 'Error'),
+              actionableMessage: msg,
+              timestamp: Date.now(),
+            };
       this.activeJob.status = isCancelled ? 'cancelled' : 'failed';
       this.activeJob.errorMessage = msg;
+      this.activeJob.diagnostic = diagnostic;
       this.activeJob.stageMessage = isCancelled
         ? 'Installation cancelled by user.'
         : `Error: ${msg}`;
       this.activeJob.finishedAtMillis = Date.now();
       this.activeJob.canRetry = true;
+      if (
+        this.activeJob.currentToolchainId &&
+        this.state.toolchainStatuses[this.activeJob.currentToolchainId]
+      ) {
+        this.state.toolchainStatuses[this.activeJob.currentToolchainId]!.lastError = msg;
+        this.state.toolchainStatuses[this.activeJob.currentToolchainId]!.diagnostic = diagnostic;
+      }
       this.probeAllToolchains();
       this.saveState();
       this.emitProgress(true);

@@ -302,6 +302,13 @@ class MainActivity : ComponentActivity() {
                     });
                 };
 
+                const toolchainListeners = [];
+                window.__obsidianReceiveToolchainEvent = function(evt) {
+                    toolchainListeners.forEach(fn => {
+                        try { fn(evt); } catch (e) {}
+                    });
+                };
+
                 const OriginalEventSource = window.EventSource;
                 window.EventSource = function(url, config) {
                     if (typeof url === 'string' && url.includes('/api/agent/events')) {
@@ -327,6 +334,46 @@ class MainActivity : ComponentActivity() {
                             }
                         };
                     }
+
+                    if (typeof url === 'string' && (url.includes('/api/toolchains/stream') || url.includes('/api/toolchains/events'))) {
+                        const listeners = {};
+                        const handler = function(payload) {
+                            const eventName = payload && payload.event ? payload.event : 'progress';
+                            const eventData = payload && payload.data ? payload.data : payload;
+                            const list = listeners[eventName] || listeners['message'] || [];
+                            const msgEvent = { data: JSON.stringify(eventData) };
+                            list.forEach(cb => { try { cb(msgEvent); } catch (e) {} });
+                        };
+                        toolchainListeners.push(handler);
+
+                        if (window.AndroidApiBridge && window.AndroidApiBridge.requestSync) {
+                            setTimeout(() => {
+                                try {
+                                    const rawRes = window.AndroidApiBridge.requestSync('GET', '/api/toolchains', null);
+                                    const parsed = JSON.parse(rawRes || '{}');
+                                    const body = typeof parsed.body === 'string' ? JSON.parse(parsed.body) : parsed.body;
+                                    const initList = listeners['init'] || [];
+                                    initList.forEach(cb => { try { cb({ data: JSON.stringify(body) }); } catch(e) {} });
+                                } catch (e) {}
+                            }, 50);
+                        }
+
+                        return {
+                            addEventListener: function(type, cb) {
+                                if (!listeners[type]) listeners[type] = [];
+                                listeners[type].push(cb);
+                            },
+                            removeEventListener: function(type, cb) {
+                                if (!listeners[type]) return;
+                                listeners[type] = listeners[type].filter(x => x !== cb);
+                            },
+                            close: function() {
+                                const idx = toolchainListeners.indexOf(handler);
+                                if (idx !== -1) toolchainListeners.splice(idx, 1);
+                            }
+                        };
+                    }
+
                     return new OriginalEventSource(url, config);
                 };
             })();

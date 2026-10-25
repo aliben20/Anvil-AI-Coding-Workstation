@@ -483,6 +483,40 @@ export type OptionalToolchainId = 'web' | 'python' | 'android' | 'cpp' | 'php' |
 
 export type ToolchainCategory = 'core' | 'optional';
 
+export type ToolchainPlatformClassification =
+  | 'android_native'
+  | 'proot_linux'
+  | 'downloadable_data'
+  | 'remote_backend';
+
+export type ToolchainDiagnosticStage =
+  | 'RESOLVE_URL'
+  | 'NETWORK_CONNECT'
+  | 'HTTP_REQUEST'
+  | 'DISK_SPACE_CHECK'
+  | 'DOWNLOAD_STREAM'
+  | 'CHECKSUM_VERIFICATION'
+  | 'CONTENT_VALIDATION'
+  | 'ARCHIVE_EXTRACTION'
+  | 'BINARY_VERIFICATION'
+  | 'EXECUTION_PERMISSION'
+  | 'ENVIRONMENT_PROBE';
+
+export interface ToolchainDiagnosticReport {
+  toolId: string;
+  stage: ToolchainDiagnosticStage;
+  httpStatus?: number;
+  exceptionType: string;
+  actionableMessage: string;
+  url?: string;
+  targetPath?: string;
+  requiredBytes?: number;
+  availableBytes?: number;
+  expectedChecksum?: string;
+  actualChecksum?: string;
+  timestamp: number;
+}
+
 export type ToolchainInstallStatus =
   | 'installed'
   | 'not_installed'
@@ -517,6 +551,8 @@ export interface ToolchainItemState {
   canUninstall: boolean;
   canUpdate: boolean;
   binaries: ToolchainBinaryCheck[];
+  platformClassification?: ToolchainPlatformClassification;
+  diagnostic?: ToolchainDiagnosticReport | null;
   usedByWorkspaces?: Array<{
     workspaceId: string;
     workspaceName: string;
@@ -563,6 +599,7 @@ export interface ToolchainJobProgress {
   finishedAtMillis?: number;
   errorMessage?: string;
   canRetry: boolean;
+  diagnostic?: ToolchainDiagnosticReport | null;
 }
 
 export interface WorkspaceToolchainStatus {
