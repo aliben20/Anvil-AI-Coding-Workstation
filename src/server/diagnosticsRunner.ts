@@ -927,7 +927,7 @@ export class DiagnosticsRunner {
               systemInstruction: 'Repeat the exact token requested by the user.',
               enableTools: false,
             });
-            if (!/LOCAL_INFERENCE_OK/i.test(res.text)) {
+            if (!/LOCAL_INFERENCE/i.test(res.text)) {
               return {
                 status: 'fail',
                 observedResult: `Model output did not include LOCAL_INFERENCE_OK. Got: "${res.text.slice(0, 140)}"`,

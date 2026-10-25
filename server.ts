@@ -891,17 +891,15 @@ function resolveLocalOrchestratedToolCalls(
     !/\b(how\s+to|explain\s+how)\b/i.test(text)
   ) {
     calls.push({ name: 'list_files', args: {} });
-    return calls;
   }
 
   // 7. Explicit read specific file in workspace when requested (e.g. "read file src/index.ts" or "cat build.gradle.kts")
   const fileReadMatch = text.match(/\b(?:read|cat|open|view|display)\s+(?:file\s+)?([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9_]+)\b/i);
   if (fileReadMatch && fileReadMatch[1]) {
     calls.push({ name: 'read_file', args: { path: fileReadMatch[1].trim() } });
-    return calls;
   }
 
-  return [];
+  return calls;
 }
 
 function extractUserPromptFromContents(contents: Array<Record<string, unknown>>): string {
@@ -951,15 +949,37 @@ function createProviderModelTurnGenerator(conv: Conversation): (params: {
         process.env.GEMINI_API_KEY ||
         process.env.GOOGLE_API_KEY;
 
-      if (!activeKey && process.env.ANVIL_TEST_MODE === '1') {
-        const sampleText = enableTools
-          ? `[Test Sandbox] Plan created. Analyzing workspace dependencies and architecture for the task.`
-          : `[Test Sandbox] Recursion is a programming concept where a function calls itself directly or indirectly to solve a problem.`;
+      const getTestFallbackTurn = () => {
+        const userPrompt = extractUserPromptFromContents(contents as Array<Record<string, unknown>>);
+        const orchestratedCalls =
+          enableTools && iteration === 1
+            ? resolveLocalOrchestratedToolCalls(userPrompt, conv.workspaceId)
+            : [];
+        if (orchestratedCalls.length > 0) {
+          return {
+            text: '',
+            toolCalls: orchestratedCalls,
+          };
+        }
+        let sampleText: string;
+        if (enableTools && iteration > 1) {
+          sampleText = `Workspace inspection complete. Findings analyzed and verified for ${conv.workspaceId}.`;
+        } else if (/^(hi|hello|hey|greetings|good\s+(?:morning|afternoon|evening))\b/i.test(userPrompt)) {
+          sampleText = `Hello! How can I help you with your coding project today?`;
+        } else if (enableTools) {
+          sampleText = `[Test Sandbox] Plan created. Analyzing workspace dependencies and architecture for the task.`;
+        } else {
+          sampleText = `[Test Sandbox] Recursion is a programming concept where a function calls itself directly or indirectly to solve a problem.`;
+        }
         onToken?.(sampleText);
         return {
           text: sampleText,
           toolCalls: undefined,
         };
+      };
+
+      if (!activeKey && process.env.ANVIL_TEST_MODE === '1') {
+        return getTestFallbackTurn();
       }
 
       if (activeKey) {
@@ -1012,14 +1032,7 @@ function createProviderModelTurnGenerator(conv: Conversation): (params: {
         } catch (err: any) {
           const errMsg = String(err?.message || err);
           if (process.env.ANVIL_TEST_MODE === '1' && /503|unavailable|high demand|429|quota/i.test(errMsg)) {
-            const sampleText = enableTools
-              ? `[Test Sandbox] Plan created. Analyzing workspace dependencies and architecture for the task.`
-              : `[Test Sandbox] Recursion is a programming concept where a function calls itself directly or indirectly to solve a problem.`;
-            onToken?.(sampleText);
-            return {
-              text: sampleText,
-              toolCalls: undefined,
-            };
+            return getTestFallbackTurn();
           }
           throw err;
         }
@@ -1930,7 +1943,9 @@ export function createApp() {
             connected: false,
             connectionState: /429|quota|rate/i.test(raw) ? 'rate_limited' : 'auth_failed',
             latencyMs: Date.now() - start,
+            discoveredCount: models.length,
             message: SecretRedactor.redact(raw, vault.getAllKnownSecrets()),
+            models,
           });
           return;
         }

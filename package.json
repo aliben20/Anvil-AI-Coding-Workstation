@@ -11,7 +11,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx --test tests/workstation.test.ts tests/localLlamaInference.test.ts tests/apkBuildTools.test.ts tests/unifiedAgentChat.test.ts tests/skillsSystem.test.ts tests/chatStreamingAndLifecycle.test.ts tests/chatEchoRegression.test.ts tests/runtimeEnvironmentAndModels.test.ts",
+    "test": "tsx --test tests/workstation.test.ts tests/localLlamaInference.test.ts tests/apkBuildTools.test.ts tests/unifiedAgentChat.test.ts tests/skillsSystem.test.ts tests/chatStreamingAndLifecycle.test.ts tests/chatEchoRegression.test.ts tests/runtimeEnvironmentAndModels.test.ts tests/unifiedChatAndAgentMode.test.ts tests/diagnosticsAndWindowsTerminal.test.ts",
     "test:duet": "tsx --test tests/security/securityPolicies.test.ts tests/plugin/vaultToolsAndDiff.test.ts tests/companion/companionService.test.ts tests/integration/multiAgentOrchestration.test.ts",
     "test:all": "npm test && npm run test:duet",
     "build:plugin": "node apps/obsidian-plugin/esbuild.config.mjs production",
