@@ -22,6 +22,8 @@ import {
   FolderPlus,
   ExternalLink,
   Code2,
+  Layers,
+  Sparkles,
 } from 'lucide-react';
 import { WorkspaceSummary, FileDiffRecord } from '../types';
 import { formatBytes } from '../design/tokens';
@@ -32,6 +34,7 @@ interface FilesTabProps {
   onSelectWorkspace?: (workspaceId: string) => void;
   onNavigateToChat?: (fileContext?: string) => void;
   onNavigateToTerminal?: (initialCommand?: string) => void;
+  onNavigateToAgents?: (fileContext?: string) => void;
 }
 
 interface WorkspaceFileItem {
@@ -46,6 +49,7 @@ export const FilesTab: React.FC<FilesTabProps> = ({
   onSelectWorkspace,
   onNavigateToChat,
   onNavigateToTerminal,
+  onNavigateToAgents,
 }) => {
   const [files, setFiles] = useState<WorkspaceFileItem[]>([]);
   const [checkpoints, setCheckpoints] = useState<FileDiffRecord[]>([]);
@@ -344,6 +348,19 @@ export const FilesTab: React.FC<FilesTabProps> = ({
             </button>
           )}
 
+          {onNavigateToAgents && (
+            <button
+              type="button"
+              onClick={() => onNavigateToAgents(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
+              className="px-2.5 py-1.5 rounded-lg bg-[#21262D] hover:bg-[#30363D] border border-[#30363D] hover:border-[#C7FF65]/60 text-xs text-[#F0F6FC] hover:text-[#C7FF65] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Open in Agents Workstation"
+              aria-label="Open in Agents Workstation"
+            >
+              <Layers className="w-3.5 h-3.5 text-[#C7FF65]" />
+              <span className="hidden sm:inline">Agents</span>
+            </button>
+          )}
+
           {onNavigateToChat && (
             <button
               type="button"
@@ -401,6 +418,17 @@ export const FilesTab: React.FC<FilesTabProps> = ({
         >
           Editor {isDirty && '•'}
         </button>
+        {onNavigateToAgents && (
+          <button
+            type="button"
+            onClick={() => onNavigateToAgents(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
+            className="px-2.5 py-1.5 text-xs font-semibold rounded-md text-[#C7FF65] bg-[#21262D]/60 hover:bg-[#21262D] border border-[#C7FF65]/30 flex items-center gap-1 shrink-0"
+            title="Open in Agents Workstation"
+          >
+            <Layers className="w-3 h-3 text-[#C7FF65]" />
+            <span>Agents</span>
+          </button>
+        )}
       </div>
 
       {/* Main Body: Two Columns on Desktop, Single View on Mobile */}
@@ -535,6 +563,25 @@ export const FilesTab: React.FC<FilesTabProps> = ({
                     <Save className="w-3.5 h-3.5" />
                     <span>{saving ? 'Saving...' : 'Save'}</span>
                   </button>
+
+                  {onNavigateToAgents && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onNavigateToAgents(
+                          `Autonomous Agent Task for file \`${selectedPath}\` in workspace \`${activeWorkspaceId}\`:\n\n\`\`\`\n${editorContent.slice(
+                            0,
+                            3000
+                          )}\n\`\`\`\nPlease inspect this file, identify any issues or opportunities for improvement, and generate concrete changes.`
+                        )
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-[#C7FF65]/10 hover:bg-[#C7FF65]/20 border border-[#C7FF65]/40 text-xs text-[#C7FF65] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Send file content to Autonomous Agent"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#C7FF65]" />
+                      <span className="hidden sm:inline">Ask Agent</span>
+                    </button>
+                  )}
 
                   {onNavigateToChat && (
                     <button

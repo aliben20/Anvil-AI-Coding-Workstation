@@ -1106,7 +1106,7 @@ export function App() {
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
-  // Mobile Bottom Navigation Tabs (5 primary items: Chat, Files, Terminal, Tools, Settings)
+  // Mobile Bottom Navigation Tabs (Chat, Files, Agents, Terminal, Tools, Settings)
   const mobileNavTabs: Array<{
     id: TabDestination;
     label: string;
@@ -1114,6 +1114,7 @@ export function App() {
   }> = [
     { id: 'chat', label: 'Chat', icon: MessageSquare },
     { id: 'files', label: 'Files', icon: FileCode },
+    { id: 'agents', label: 'Agents', icon: Layers },
     { id: 'terminal', label: 'Terminal', icon: Terminal },
     { id: 'tools', label: 'Tools', icon: Code2 },
     { id: 'settings', label: 'Settings', icon: SettingsIcon },
@@ -1393,8 +1394,10 @@ export function App() {
       <div className="flex-1 min-h-0 flex overflow-hidden relative">
         {/* Primary Viewport Area (Takes 100% space when Context is collapsed) */}
         <main className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-[#0D1117]">
-          {/* Unified Tools Hub Sub-Navigation (Tools, Skills, Workspaces, Images, Models, Preview) */}
-          {(activeTab === 'tools' ||
+          {/* Unified Hub Sub-Navigation (Files, Agents, Tools, Skills, Workspaces, Images, Models, Preview) */}
+          {(activeTab === 'files' ||
+            activeTab === 'agents' ||
+            activeTab === 'tools' ||
             activeTab === 'skills' ||
             activeTab === 'projects' ||
             activeTab === 'images' ||
@@ -1402,6 +1405,8 @@ export function App() {
             activeTab === 'preview') && (
             <div className="px-3 sm:px-5 py-2 border-b border-[#30363D] bg-[#161B22] flex items-center gap-1.5 overflow-x-auto no-scrollbar shrink-0">
               {[
+                { id: 'files' as TabDestination, label: 'Files', icon: FileCode },
+                { id: 'agents' as TabDestination, label: 'Agents', icon: Layers },
                 { id: 'tools' as TabDestination, label: 'Tools', icon: Code2 },
                 { id: 'skills' as TabDestination, label: 'Skills', icon: Sparkles },
                 { id: 'projects' as TabDestination, label: 'Workspaces', icon: FolderGit2 },
@@ -1540,6 +1545,12 @@ export function App() {
                     setQueuedTerminalCommand(cmd);
                   }
                   setActiveTab('terminal');
+                }}
+                onNavigateToAgents={(fileContext?: string) => {
+                  if (fileContext && activeConv) {
+                    handleUpdateConversationMeta(activeConv.id, { chatMode: 'agent' });
+                  }
+                  setActiveTab('agents');
                 }}
               />
             </TabErrorBoundary>
@@ -1857,7 +1868,7 @@ export function App() {
           ========================================================================= */}
       <nav
         aria-label="Mobile Navigation"
-        className="md:hidden border-t border-[#30363D] bg-[#161B22] grid grid-cols-5 items-center h-14 sm:h-16 shrink-0 safe-bottom z-40"
+        className="md:hidden border-t border-[#30363D] bg-[#161B22] grid grid-cols-6 items-center h-14 sm:h-16 shrink-0 safe-bottom z-40"
       >
         {mobileNavTabs.map((tab) => {
           const Icon = tab.icon;
