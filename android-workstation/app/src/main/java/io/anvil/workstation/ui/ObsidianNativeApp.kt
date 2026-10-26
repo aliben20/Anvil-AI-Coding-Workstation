@@ -1247,12 +1247,14 @@ private fun ProjectEditorScreen(vm: WorkstationViewModel) {
 
 @Composable
 private fun AgentsScreen(vm: WorkstationViewModel) {
+    val isDuet = vm.agentScreenTab == "duet"
+
     Column(Modifier.fillMaxSize().imePadding()) {
         ScreenHeader(
-            title = "Agents",
-            subtitle = "${vm.agentRoles.size} roles · bounded native subagents",
+            title = if (isDuet) "Duet Agent" else "Subagents",
+            subtitle = if (isDuet) "2x AI · Lead Coder + Peer Reviewer" else "${vm.agentRoles.size} roles · bounded native subagents",
             actions = {
-                if (vm.agentBusy) {
+                if (vm.duetBusy || vm.agentBusy) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 1.5.dp,
@@ -1262,80 +1264,418 @@ private fun AgentsScreen(vm: WorkstationViewModel) {
             },
         )
 
-        Column(
+        // Top Segmented Mode Switcher: [ ⚡ Duet Multi-Agent (2x AI) ]  [ 👥 Subagent Roles ]
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                vm.agentRoles.forEach { role ->
-                    FilterChip(
-                        selected = vm.selectedRole == role,
-                        onClick = { vm.selectedRole = role },
-                        label = { Text(role, fontSize = 11.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            containerColor = ObsidianPalette.Surface,
-                            labelColor = ObsidianPalette.TextSecondary,
-                            selectedContainerColor = ObsidianPalette.Accent,
-                            selectedLabelColor = ObsidianPalette.Background,
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = vm.selectedRole == role,
-                            borderColor = ObsidianPalette.Border,
-                            selectedBorderColor = ObsidianPalette.Accent,
-                        ),
-                    )
-                }
-            }
-            OutlinedTextField(
-                value = vm.agentPrompt,
-                onValueChange = { vm.agentPrompt = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Describe the task for the ${vm.selectedRole.lowercase()}...", fontSize = 12.sp) },
-                textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
-                maxLines = 4,
-                shape = RoundedCornerShape(8.dp),
-                colors = obsidianFieldColors(),
-            )
-            Button(
-                onClick = { vm.runAgentTask() },
-                enabled = !vm.agentBusy && vm.agentPrompt.isNotBlank(),
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = ObsidianPalette.Accent,
-                    contentColor = ObsidianPalette.Background,
-                    disabledContainerColor = ObsidianPalette.SurfaceMuted,
-                    disabledContentColor = ObsidianPalette.TextMuted,
+            FilterChip(
+                selected = vm.agentScreenTab == "duet",
+                onClick = { vm.agentScreenTab = "duet" },
+                label = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (vm.agentScreenTab == "duet") ObsidianPalette.Background else ObsidianPalette.Accent)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Duet Multi-Agent (2x AI)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = ObsidianPalette.Surface,
+                    labelColor = ObsidianPalette.TextSecondary,
+                    selectedContainerColor = ObsidianPalette.Accent,
+                    selectedLabelColor = ObsidianPalette.Background,
                 ),
-            ) {
-                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Run ${vm.selectedRole}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = vm.agentScreenTab == "duet",
+                    borderColor = ObsidianPalette.Border,
+                    selectedBorderColor = ObsidianPalette.Accent,
+                ),
+                modifier = Modifier.weight(1f),
+            )
+
+            FilterChip(
+                selected = vm.agentScreenTab == "roles",
+                onClick = { vm.agentScreenTab = "roles" },
+                label = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (vm.agentScreenTab == "roles") ObsidianPalette.Background else ObsidianPalette.TextSecondary)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Subagent Roles", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    containerColor = ObsidianPalette.Surface,
+                    labelColor = ObsidianPalette.TextSecondary,
+                    selectedContainerColor = ObsidianPalette.Accent,
+                    selectedLabelColor = ObsidianPalette.Background,
+                ),
+                border = FilterChipDefaults.filterChipBorder(
+                    enabled = true,
+                    selected = vm.agentScreenTab == "roles",
+                    borderColor = ObsidianPalette.Border,
+                    selectedBorderColor = ObsidianPalette.Accent,
+                ),
+                modifier = Modifier.weight(1f),
+            )
         }
 
         HorizontalDivider(color = ObsidianPalette.BorderSubtle)
 
-        if (vm.agentTasks.isEmpty()) {
-            EmptyState(
-                icon = Icons.Default.SmartToy,
-                title = "No agent runs yet",
-                body = "Pick a role, describe a task, and the subagent will analyze the active workspace.",
-            )
+        if (isDuet) {
+            // DUET MULTI-AGENT PAGE FOR ANDROID
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // Dual Role Selectors (Primary Blue + Collaborator Purple)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // Primary Role (Blue #388BFD)
+                    Surface(
+                        color = ObsidianPalette.Surface,
+                        border = BorderStroke(1.dp, Color(0xFF388BFD).copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF388BFD)))
+                                Spacer(Modifier.width(4.dp))
+                                Text("LEAD CODER", color = Color(0xFF58A6FF), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            }
+                            Text(vm.duetPrimaryRole, color = ObsidianPalette.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    // Collaborator Role (Violet #A371F7)
+                    Surface(
+                        color = ObsidianPalette.Surface,
+                        border = BorderStroke(1.dp, Color(0xFFA371F7).copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFA371F7)))
+                                Spacer(Modifier.width(4.dp))
+                                Text("PEER REVIEWER", color = Color(0xFFD2A8FF), fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                            }
+                            Text(vm.duetCollaboratorRole, color = ObsidianPalette.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+
+                // Preset Chips
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    listOf("Fix Toolchain Pipeline", "Concurrency & Memory Audit", "Write Verification Tests", "Android Touch Ergonomics").forEach { preset ->
+                        AssistChip(
+                            onClick = { vm.duetPrompt = preset },
+                            label = { Text(preset, fontSize = 10.sp) },
+                            colors = AssistChipDefaults.assistChipColors(
+                                containerColor = ObsidianPalette.SurfaceMuted,
+                                labelColor = ObsidianPalette.TextSecondary,
+                            ),
+                            border = AssistChipDefaults.assistChipBorder(
+                                enabled = true,
+                                borderColor = ObsidianPalette.BorderSubtle,
+                            ),
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = vm.duetPrompt,
+                    onValueChange = { vm.duetPrompt = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Describe coding objective for Duet agents...", fontSize = 12.sp) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    maxLines = 4,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = obsidianFieldColors(),
+                )
+
+                Button(
+                    onClick = { vm.runDuetTurn() },
+                    enabled = !vm.duetBusy && vm.duetPrompt.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ObsidianPalette.Accent,
+                        contentColor = ObsidianPalette.Background,
+                        disabledContainerColor = ObsidianPalette.SurfaceMuted,
+                        disabledContentColor = ObsidianPalette.TextMuted,
+                    ),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Run Duet Turn (2x AI)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            HorizontalDivider(color = ObsidianPalette.BorderSubtle)
+
+            if (vm.duetTurns.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Default.SmartToy,
+                    title = "Ready for Duet Turn",
+                    body = "Primary Agent generates solution code, Collaborator audits safety & edge cases.",
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(vm.duetTurns, key = { it.id }) { turn ->
+                        DuetTurnCard(turn)
+                    }
+                }
+            }
         } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(14.dp),
+            // SUBAGENT ROLES TAB
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(vm.agentTasks, key = { it.id }) { task ->
-                    AgentTaskCard(task)
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    vm.agentRoles.forEach { role ->
+                        FilterChip(
+                            selected = vm.selectedRole == role,
+                            onClick = { vm.selectedRole = role },
+                            label = { Text(role, fontSize = 11.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = ObsidianPalette.Surface,
+                                labelColor = ObsidianPalette.TextSecondary,
+                                selectedContainerColor = ObsidianPalette.Accent,
+                                selectedLabelColor = ObsidianPalette.Background,
+                            ),
+                            border = FilterChipDefaults.filterChipBorder(
+                                enabled = true,
+                                selected = vm.selectedRole == role,
+                                borderColor = ObsidianPalette.Border,
+                                selectedBorderColor = ObsidianPalette.Accent,
+                            ),
+                        )
+                    }
+                }
+                OutlinedTextField(
+                    value = vm.agentPrompt,
+                    onValueChange = { vm.agentPrompt = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Describe the task for the ${vm.selectedRole.lowercase()}...", fontSize = 12.sp) },
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                    maxLines = 4,
+                    shape = RoundedCornerShape(8.dp),
+                    colors = obsidianFieldColors(),
+                )
+                Button(
+                    onClick = { vm.runAgentTask() },
+                    enabled = !vm.agentBusy && vm.agentPrompt.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ObsidianPalette.Accent,
+                        contentColor = ObsidianPalette.Background,
+                        disabledContainerColor = ObsidianPalette.SurfaceMuted,
+                        disabledContentColor = ObsidianPalette.TextMuted,
+                    ),
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Run ${vm.selectedRole}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+
+            HorizontalDivider(color = ObsidianPalette.BorderSubtle)
+
+            if (vm.agentTasks.isEmpty()) {
+                EmptyState(
+                    icon = Icons.Default.SmartToy,
+                    title = "No agent runs yet",
+                    body = "Pick a role, describe a task, and the subagent will analyze the active workspace.",
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    contentPadding = PaddingValues(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    items(vm.agentTasks, key = { it.id }) { task ->
+                        AgentTaskCard(task)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DuetTurnCard(turn: DuetTurn) {
+    val statusColor = when (turn.status) {
+        AgentTaskStatus.RUNNING -> Color(0xFF58A6FF)
+        AgentTaskStatus.COMPLETED -> ObsidianPalette.Success
+        AgentTaskStatus.FAILED -> ObsidianPalette.Danger
+    }
+    Surface(
+        color = ObsidianPalette.Surface,
+        border = BorderStroke(1.dp, ObsidianPalette.Border),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "DUET TURN",
+                    color = ObsidianPalette.Accent,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .border(1.dp, ObsidianPalette.Accent.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "${turn.primaryRole} + ${turn.collaboratorRole}",
+                    color = ObsidianPalette.TextSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = turn.status.name,
+                    color = statusColor,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                )
+            }
+
+            // Prompt
+            Text(
+                text = turn.prompt,
+                color = ObsidianPalette.TextPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            // Primary Solution Box (Blue #388BFD)
+            Surface(
+                color = ObsidianPalette.BackgroundDeep,
+                border = BorderStroke(1.dp, Color(0xFF388BFD).copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFF388BFD)))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "PRIMARY: ${turn.primaryRole.uppercase(Locale.getDefault())} (CODE PROPOSAL)",
+                            color = Color(0xFF58A6FF),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    if (turn.primaryResult.isNotBlank()) {
+                        Text(
+                            text = turn.primaryResult,
+                            color = ObsidianPalette.TextPrimary,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            maxLines = 10,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (turn.status == AgentTaskStatus.RUNNING) {
+                        Text(
+                            text = "Generating code patch & implementation...",
+                            color = ObsidianPalette.TextSecondary,
+                            fontSize = 11.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                    }
+                }
+            }
+
+            // Collaborator Review Box (Violet #A371F7)
+            Surface(
+                color = ObsidianPalette.BackgroundDeep,
+                border = BorderStroke(1.dp, Color(0xFFA371F7).copy(alpha = 0.4f)),
+                shape = RoundedCornerShape(8.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFA371F7)))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "COLLABORATOR: ${turn.collaboratorRole.uppercase(Locale.getDefault())} (PEER REVIEW)",
+                            color = Color(0xFFD2A8FF),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                    if (turn.collaboratorReview.isNotBlank()) {
+                        Text(
+                            text = turn.collaboratorReview,
+                            color = Color(0xFFE8EAED),
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                            maxLines = 10,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else if (turn.status == AgentTaskStatus.RUNNING) {
+                        Text(
+                            text = "Awaiting primary output for architecture & safety audit...",
+                            color = ObsidianPalette.TextSecondary,
+                            fontSize = 11.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                    }
+                }
+            }
+
+            // Consensus badge if completed
+            if (turn.status == AgentTaskStatus.COMPLETED) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = ObsidianPalette.Success, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = "96% Consensus Aligned",
+                            color = ObsidianPalette.Success,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    Text(
+                        text = "Safety & Memory Verified",
+                        color = ObsidianPalette.TextSecondary,
+                        fontSize = 10.sp,
+                    )
                 }
             }
         }

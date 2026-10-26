@@ -26,6 +26,7 @@ import {
   Folder,
   FileCode,
   Check,
+  Bot,
 } from 'lucide-react';
 import {
   TabDestination,
@@ -48,6 +49,7 @@ import { FilesTab } from './components/FilesTab';
 import { PreviewTab } from './components/PreviewTab';
 import { ToolsTab } from './components/ToolsTab';
 import { AgentsTab } from './components/AgentsTab';
+import { DuetAgentView } from './components/DuetAgentView';
 import { SkillsTab } from './components/SkillsTab';
 import { TerminalTab } from './components/TerminalTab';
 import { SettingsTab } from './components/SettingsTab';
@@ -1404,6 +1406,7 @@ export function App() {
           {/* Unified Hub Sub-Navigation (Files, Agents, Tools, Skills, Workspaces, Images, Models, Preview) */}
           {(activeTab === 'files' ||
             activeTab === 'agents' ||
+            activeTab === 'duet' ||
             activeTab === 'tools' ||
             activeTab === 'skills' ||
             activeTab === 'projects' ||
@@ -1414,6 +1417,7 @@ export function App() {
               {[
                 { id: 'files' as TabDestination, label: 'Files', icon: FileCode },
                 { id: 'agents' as TabDestination, label: 'Agents', icon: Layers },
+                { id: 'duet' as TabDestination, label: 'Duet', icon: Bot },
                 { id: 'tools' as TabDestination, label: 'Tools', icon: Code2 },
                 { id: 'skills' as TabDestination, label: 'Skills', icon: Sparkles },
                 { id: 'projects' as TabDestination, label: 'Workspaces', icon: FolderGit2 },
@@ -1572,7 +1576,7 @@ export function App() {
                   if (fileContext && activeConv) {
                     handleUpdateConversationMeta(activeConv.id, { chatMode: 'agent' });
                   }
-                  setActiveTab('agents');
+                  setActiveTab('duet');
                 }}
               />
             </TabErrorBoundary>
@@ -1671,6 +1675,32 @@ export function App() {
                 providers={providers}
                 onNavigateToWorkspace={(id) => setActiveWorkspaceId(id)}
                 onNavigateToChat={handleNavigateToChat}
+              />
+            </TabErrorBoundary>
+          )}
+
+          {activeTab === 'duet' && (
+            <TabErrorBoundary>
+              <DuetAgentView
+                activeWorkspaceId={activeWorkspaceId}
+                activeConv={activeConv}
+                conversations={conversations}
+                events={events}
+                sending={sending}
+                onSendMessage={handleSendMessage}
+                onStopGeneration={handleStopGeneration}
+                subagentTasks={subagentTasks}
+                onSelectConversation={(id) => setActiveConvId(id)}
+                onNavigateToWorkspace={(id) => setActiveWorkspaceId(id)}
+                onNavigateToChat={handleNavigateToChat}
+                providers={providers}
+                onUpdateConversationMeta={handleUpdateConversationMeta}
+                onNavigateToTerminal={(cmd?: string) => {
+                  if (typeof cmd === 'string' && cmd.trim()) {
+                    setQueuedTerminalCommand(cmd);
+                  }
+                  setActiveTab('terminal');
+                }}
               />
             </TabErrorBoundary>
           )}
@@ -1907,7 +1937,7 @@ export function App() {
                 activeTab === 'images' ||
                 activeTab === 'models'
               : tab.id === 'agents'
-              ? activeTab === 'agents'
+              ? activeTab === 'agents' || activeTab === 'duet'
               : tab.id === 'terminal'
               ? activeTab === 'terminal'
               : tab.id === 'settings'

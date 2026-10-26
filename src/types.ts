@@ -9,6 +9,7 @@ export type TabDestination =
   | 'tools'
   | 'skills'
   | 'agents'
+  | 'duet'
   | 'providers'
   | 'diagnostics'
   | 'settings';

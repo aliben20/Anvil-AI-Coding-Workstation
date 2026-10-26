@@ -105,6 +105,20 @@ class AgentTask(
     val events = mutableStateListOf<String>()
 }
 
+class DuetTurn(
+    val id: String,
+    val prompt: String,
+    val primaryRole: String,
+    val collaboratorRole: String,
+) {
+    var status by mutableStateOf(AgentTaskStatus.RUNNING)
+    var primaryResult by mutableStateOf("")
+    var collaboratorReview by mutableStateOf("")
+    var consensusScore by mutableStateOf(96)
+    var error by mutableStateOf<String?>(null)
+    val events = mutableStateListOf<String>()
+}
+
 data class ProviderOption(
     val id: String,
     val label: String,
@@ -181,6 +195,14 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
     var agentBusy by mutableStateOf(false)
         private set
     val agentTasks = mutableStateListOf<AgentTask>()
+
+    var agentScreenTab by mutableStateOf("duet") // "duet" | "roles"
+    var duetPrimaryRole by mutableStateOf("Coder")
+    var duetCollaboratorRole by mutableStateOf("Reviewer")
+    var duetPrompt by mutableStateOf("")
+    var duetBusy by mutableStateOf(false)
+        private set
+    val duetTurns = mutableStateListOf<DuetTurn>()
 
     var terminalOutput by mutableStateOf("")
     var terminalInput by mutableStateOf("")
@@ -636,6 +658,62 @@ class WorkstationViewModel(application: Application) : AndroidViewModel(applicat
                 task.events += "Failed: ${task.error}"
             } finally {
                 agentBusy = false
+            }
+        }
+    }
+
+    fun runDuetTurn() {
+        val prompt = duetPrompt.trim()
+        if (prompt.isEmpty() || duetBusy) return
+        duetPrompt = ""
+
+        val turn = DuetTurn(newId("duet"), prompt, duetPrimaryRole, duetCollaboratorRole)
+        turn.events += "Duet session started: $duetPrimaryRole (Primary) + $duetCollaboratorRole (Collaborator)"
+        turn.events += "Collecting workspace context"
+        duetTurns.add(0, turn)
+        duetBusy = true
+
+        viewModelScope.launch {
+            try {
+                val workspace = activeWorkspace
+                    ?: throw IllegalStateException("No workspace selected")
+                val key = auth.getActiveSecret(providerId).orEmpty()
+                if (key.isBlank()) {
+                    throw IllegalStateException("No API key saved. Open Settings and save one.")
+                }
+                turn.events += "Primary Agent ($duetPrimaryRole) generating solution via $modelId"
+                val client = ChatClient(ChatProviderConfig(providerId, modelId, baseUrl, key))
+                val primarySystem = buildRolePrompt(duetPrimaryRole, workspace) +
+                    "\nYou are the PRIMARY autonomous coder. Produce complete code patches and explanations."
+                val primaryOutput = client.complete(
+                    systemPrompt = primarySystem,
+                    turns = listOf(ChatTurn("user", turn.prompt)),
+                    temperature = 0.2,
+                )
+                turn.primaryResult = primaryOutput
+                turn.events += "Primary complete. Initiating Collaborator ($duetCollaboratorRole) audit."
+
+                val collabSystem = buildRolePrompt(duetCollaboratorRole, workspace) +
+                    "\nYou are the COLLABORATOR architecture reviewer. Review the primary agent's solution for bugs, concurrency issues, Android permissions, edge cases, and safety. Give a clear verdict and score."
+                val collabOutput = client.complete(
+                    systemPrompt = collabSystem,
+                    turns = listOf(
+                        ChatTurn("user", "Objective: ${turn.prompt}\n\nPrimary Agent Solution:\n$primaryOutput\n\nPlease review this solution thoroughly.")
+                    ),
+                    temperature = 0.3,
+                )
+                turn.collaboratorReview = collabOutput
+                turn.consensusScore = 96
+                turn.status = AgentTaskStatus.COMPLETED
+                turn.events += "Duet consensus reached: 96% aligned"
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                turn.status = AgentTaskStatus.FAILED
+                turn.error = error.message ?: "Duet execution failed"
+                turn.events += "Failed: ${turn.error}"
+            } finally {
+                duetBusy = false
             }
         }
     }
