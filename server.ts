@@ -1656,8 +1656,8 @@ export function createApp() {
 
   app.post('/api/toolchains/resources/download', async (req, res) => {
     try {
-      const { variant, bundleId } = req.body || {};
-      const result = await toolchainManager.downloadRepositoryAsset({ variant, bundleId });
+      const { variant, bundleId, assetId } = req.body || {};
+      const result = await toolchainManager.downloadRepositoryAsset({ variant, bundleId, assetId });
       res.json({ ...result, catalog: toolchainManager.getMobileHarnessResources() });
     } catch (err) {
       if (err instanceof ToolchainDownloadError) {
@@ -1667,6 +1667,25 @@ export function createApp() {
         });
         return;
       }
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/toolchains/resources/sync', async (_req, res) => {
+    try {
+      const syncResult = await toolchainManager.fetchAndSyncLiveMetadata();
+      res.json({ ...syncResult, catalog: toolchainManager.getMobileHarnessResources() });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/toolchains/:id/clear-error', (req, res) => {
+    try {
+      const { id } = req.params;
+      toolchainManager.clearToolchainError(id);
+      res.json({ ok: true, status: toolchainManager.getFullStatus() });
+    } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });

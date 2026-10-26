@@ -27,12 +27,77 @@ import {
   WorkspaceToolchainStatus,
   MobileHarnessBundleSpec,
   MobileHarnessReleaseArtifact,
+  MobileHarnessStandaloneAsset,
   MobileHarnessRepoResourceCatalog,
   ToolchainManagerStatus,
   ToolchainPlatformClassification,
   ToolchainDiagnosticStage,
   ToolchainDiagnosticReport,
 } from '../types.js';
+
+export const OFFICIAL_MOBILE_HARNESS_REPO_URL = 'https://github.com/techjarves/Mobile-Harness';
+export const OFFICIAL_RUNTIME_RELEASE_BASE_URL =
+  'https://github.com/techjarves/Mobile-Harness/releases/download/runtime-2026.09.4';
+export const OFFICIAL_UPDATE_METADATA_URL =
+  'https://raw.githubusercontent.com/techjarves/Mobile-Harness/main/mobile-harness-update.json';
+export const OFFICIAL_RUNTIME_MANIFEST_URL =
+  'https://raw.githubusercontent.com/techjarves/Mobile-Harness/main/dist/runtime-bundles/manifest.json';
+
+export const OFFICIAL_STANDALONE_TOOLCHAINS: Array<{
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  sha256: string;
+  fileName: string;
+  sizeBytes: number;
+}> = [
+  {
+    id: 'android-sdk-arm64',
+    name: 'Android SDK (ARM64 Platform 36 & Build-Tools 35)',
+    description: 'Standalone Android SDK binaries for ARM64 Android devices.',
+    url: 'https://appdevforall.org/dev-assets/debug/android-sdk-arm64-v8a.zip',
+    sha256: 'bfe5bc940a7ede14735817a40962256666ce4152b9f3135f34a4ab9bccb87c3f',
+    fileName: 'android-sdk-arm64-v8a.zip',
+    sizeBytes: 135_000_000,
+  },
+  {
+    id: 'gradle-8.14.3',
+    name: 'Gradle Build Tool 8.14.3',
+    description: 'Gradle official binary distribution for building Android applications.',
+    url: 'https://appdevforall.org/dev-assets/debug/gradle-8.14.3-bin.zip',
+    sha256: '8e228b640319a7c739c0a93d002facdeb08e8f3ba394d57d74ee355a5e93072c',
+    fileName: 'gradle-8.14.3-bin.zip',
+    sizeBytes: 165_000_000,
+  },
+  {
+    id: 'local-mvn-repo',
+    name: 'Offline Local Maven Repository',
+    description: 'Pre-cached AndroidX and Kotlin Maven dependencies for offline building.',
+    url: 'https://appdevforall.org/dev-assets/debug/localMvnRepository.zip',
+    sha256: '3ba89892b43377d60743568d1b9004f172c2eab75dac059064f82dec497819f9',
+    fileName: 'localMvnRepository.zip',
+    sizeBytes: 240_000_000,
+  },
+  {
+    id: 'github-cli',
+    name: 'GitHub CLI 2.100.0 (ARM64)',
+    description: 'Official GitHub CLI binary for Linux ARM64.',
+    url: 'https://github.com/cli/cli/releases/download/v2.100.0/gh_2.100.0_linux_arm64.tar.gz',
+    sha256: 'ea4e7a581a32ccad6cc7923cb1576ac5859ba4b9a16ab22eb8f8a96e78e2e961',
+    fileName: 'gh_2.100.0_linux_arm64.tar.gz',
+    sizeBytes: 14_800_000,
+  },
+  {
+    id: 'composer',
+    name: 'Composer Latest Stable',
+    description: 'Composer dependency manager for PHP.',
+    url: 'https://getcomposer.org/download/latest-stable/composer.phar',
+    sha256: '',
+    fileName: 'composer.phar',
+    sizeBytes: 3_200_000,
+  },
+];
 
 export class ToolchainDownloadError extends Error {
   public toolId: string;
@@ -1268,9 +1333,215 @@ export class MobileHarnessToolchainManager {
           fs.cpSync(src, this.mobileHarnessRepoDir, { recursive: true });
         }
       }
+
+      // Ensure authoritative manifest.json exists in repository mirror
+      const manifestDir = path.join(this.mobileHarnessRepoDir, 'dist', 'runtime-bundles');
+      const manifestFile = path.join(manifestDir, 'manifest.json');
+      if (!fs.existsSync(manifestFile)) {
+        fs.mkdirSync(manifestDir, { recursive: true });
+        const defaultManifest = {
+          schemaVersion: 1,
+          architecture: 'arm64',
+          bundles: {
+            core: {
+              version: '2026.09.5',
+              file: 'pocketdev-core-arm64-2026.09.5.tar.zst',
+              sha256: 'df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012',
+              compressedBytes: 72185773,
+              uncompressedBytes: 215224320,
+              includes: ['/bin', '/etc', '/lib', '/sbin', '/usr', '/var'],
+            },
+            claude: {
+              version: '2026.09.1',
+              file: 'pocketdev-claude-arm64-2026.09.1.tar.zst',
+              sha256: '0f68e15630e8c0fc941afe3f61ab5a3eb4407b334018de6dbdabfa5eca627724',
+              compressedBytes: 75289800,
+              uncompressedBytes: 220000000,
+              base: 'core',
+              includes: ['/usr/local/bin/claude'],
+            },
+            python: {
+              version: '2026.09.2',
+              file: 'pocketdev-python-arm64-2026.09.2.tar.zst',
+              sha256: '6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85',
+              compressedBytes: 55419626,
+              uncompressedBytes: 142127360,
+              base: 'core',
+              includes: ['/usr/bin/python3', '/usr/bin/pip3', '/usr/lib/python3.11'],
+            },
+            android: {
+              version: '2026.09.1',
+              file: 'pocketdev-android-arm64-2026.09.1.tar.zst',
+              sha256: '01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6',
+              compressedBytes: 569652007,
+              uncompressedBytes: 866703360,
+              base: 'core',
+              includes: ['/root/android-sdk', '/opt/gradle', '/root/maven'],
+            },
+            dsh: {
+              version: '2026.09.1',
+              file: 'pocketdev-dsh-arm64-2026.09.1.tar.zst',
+              sha256: '88e6a23ba74e1cd74a2c923b7e0d6bd78ba4b7e5f8a9b649f12bf4ffe158cce5',
+              compressedBytes: 27752194,
+              uncompressedBytes: 85000000,
+              base: 'core',
+              includes: ['/usr/local/bin/dsh'],
+            },
+            agy: {
+              version: '2026.09.1',
+              file: 'pocketdev-agy-arm64-2026.09.1.tar.zst',
+              sha256: 'a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78',
+              compressedBytes: 41870025,
+              uncompressedBytes: 120000000,
+              base: 'core',
+              includes: ['/root/.local/bin/agy'],
+            },
+          },
+        };
+        fs.writeFileSync(manifestFile, JSON.stringify(defaultManifest, null, 2), 'utf-8');
+      }
+
+      // Ensure authoritative mobile-harness-update.json exists in repository mirror
+      const updateFile = path.join(this.mobileHarnessRepoDir, 'mobile-harness-update.json');
+      if (!fs.existsSync(updateFile)) {
+        fs.mkdirSync(path.dirname(updateFile), { recursive: true });
+        const defaultUpdate = {
+          versionCode: 8,
+          versionName: '1.0.7',
+          notes:
+            'Repairs DeepSeek Harness installs after incompatible updates, adds visible update progress, and keeps active Antigravity sessions alive more reliably in the background.',
+          artifacts: {
+            online: {
+              url: 'https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.7/mobile-harness-online-v1.0.7.apk',
+              sha256: 'c41795826ae1c9a9afec8b393d15ebd3c934d52b857d66eb62123a1079a98588',
+              sizeBytes: 20971520,
+            },
+            offline: {
+              url: 'https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.7/mobile-harness-offline-v1.0.7.apk',
+              sha256: '99879b6e0c7d295e66cdd108f2c4a0ba8fa3a6211eb607733eba1ce91bc0a34e',
+              sizeBytes: 838860800,
+            },
+          },
+        };
+        fs.writeFileSync(updateFile, JSON.stringify(defaultUpdate, null, 2), 'utf-8');
+      }
     } catch {
       // ignore
     }
+  }
+
+  /**
+   * Dynamically fetches the current Mobile Harness update metadata and runtime manifest
+   * from official sources, validates checksums and structures, and refreshes the local mirror.
+   */
+  async fetchAndSyncLiveMetadata(signal?: AbortSignal): Promise<{
+    updateMetadataSynced: boolean;
+    manifestSynced: boolean;
+    versionName: string;
+    bundlesCount: number;
+  }> {
+    let updateMetadataSynced = false;
+    let manifestSynced = false;
+    let versionName = '1.0.7';
+    let bundlesCount = 0;
+
+    // 1. Fetch & validate live mobile-harness-update.json
+    try {
+      const resp = await fetch(OFFICIAL_UPDATE_METADATA_URL, { signal });
+      if (resp.ok) {
+        const text = await resp.text();
+        const parsed = JSON.parse(text);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          typeof parsed.versionCode === 'number' &&
+          parsed.artifacts &&
+          typeof parsed.artifacts === 'object'
+        ) {
+          const online = parsed.artifacts.online;
+          const offline = parsed.artifacts.offline;
+          const shaRegex = /^[a-fA-F0-9]{64}$/;
+          if (
+            (!online || shaRegex.test(String(online.sha256 || ''))) &&
+            (!offline || shaRegex.test(String(offline.sha256 || '')))
+          ) {
+            const updateFile = path.join(this.mobileHarnessRepoDir, 'mobile-harness-update.json');
+            fs.mkdirSync(path.dirname(updateFile), { recursive: true });
+            fs.writeFileSync(updateFile, JSON.stringify(parsed, null, 2), 'utf-8');
+            updateMetadataSynced = true;
+            versionName = String(parsed.versionName || '1.0.7');
+          }
+        }
+      }
+    } catch {
+      // transient or offline; keep cached
+    }
+
+    // 2. Fetch & validate live dist/runtime-bundles/manifest.json
+    try {
+      const resp = await fetch(OFFICIAL_RUNTIME_MANIFEST_URL, { signal });
+      if (resp.ok) {
+        const text = await resp.text();
+        const parsed = JSON.parse(text);
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          parsed.bundles &&
+          typeof parsed.bundles === 'object'
+        ) {
+          const shaRegex = /^[a-fA-F0-9]{64}$/;
+          let allValid = true;
+          let count = 0;
+          for (const [_, b] of Object.entries(parsed.bundles as Record<string, Record<string, unknown>>)) {
+            if (!b.file || !shaRegex.test(String(b.sha256 || '')) || typeof b.compressedBytes !== 'number') {
+              allValid = false;
+              break;
+            }
+            count++;
+          }
+          if (allValid && count > 0) {
+            const manifestFile = path.join(
+              this.mobileHarnessRepoDir,
+              'dist',
+              'runtime-bundles',
+              'manifest.json'
+            );
+            fs.mkdirSync(path.dirname(manifestFile), { recursive: true });
+            fs.writeFileSync(manifestFile, JSON.stringify(parsed, null, 2), 'utf-8');
+            manifestSynced = true;
+            bundlesCount = count;
+          }
+        }
+      }
+    } catch {
+      // transient or offline; keep cached
+    }
+
+    return {
+      updateMetadataSynced,
+      manifestSynced,
+      versionName,
+      bundlesCount,
+    };
+  }
+
+  /**
+   * Clears the last error and diagnostic for a specific toolchain or active job.
+   */
+  clearToolchainError(id: string): void {
+    if (this.state.toolchainStatuses[id as ToolchainId]) {
+      this.state.toolchainStatuses[id as ToolchainId]!.lastError = null;
+      this.state.toolchainStatuses[id as ToolchainId]!.diagnostic = null;
+    }
+    if (this.activeJob && (this.activeJob.currentToolchainId === id || id === 'all')) {
+      if (this.activeJob.status === 'failed') {
+        this.activeJob.status = 'idle';
+        this.activeJob.errorMessage = undefined;
+        this.activeJob.diagnostic = null;
+      }
+    }
+    this.saveState();
+    this.emitProgress(true);
   }
 
 
@@ -1903,7 +2174,7 @@ export class MobileHarnessToolchainManager {
               base: b.base ? String(b.base) : undefined,
               includes: Array.isArray(b.includes) ? b.includes.map(String) : [],
               excludes: Array.isArray(b.excludes) ? b.excludes.map(String) : undefined,
-              downloadUrl: `https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.7/${fileName}`,
+              downloadUrl: `${OFFICIAL_RUNTIME_RELEASE_BASE_URL}/${fileName}`,
               downloaded,
               localPath: downloaded ? localPath : null,
               verifiedChecksum,
@@ -1919,75 +2190,62 @@ export class MobileHarnessToolchainManager {
       const defaultBundleSpecs = [
         {
           id: 'core',
-          version: '1.0.7',
-          file: 'bundle-core-arm64.tar.zst',
-          sha256: '9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b',
-          compressedBytes: 48_000_000,
-          uncompressedBytes: 155_000_000,
-          includes: ['/usr/bin/node', '/usr/bin/npm', '/usr/bin/git', '/lib', '/usr/lib'],
+          version: '2026.09.5',
+          file: 'pocketdev-core-arm64-2026.09.5.tar.zst',
+          sha256: 'df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012',
+          compressedBytes: 72_185_773,
+          uncompressedBytes: 215_224_320,
+          includes: ['/bin', '/etc', '/lib', '/sbin', '/usr', '/var'],
+        },
+        {
+          id: 'claude',
+          version: '2026.09.1',
+          file: 'pocketdev-claude-arm64-2026.09.1.tar.zst',
+          sha256: '0f68e15630e8c0fc941afe3f61ab5a3eb4407b334018de6dbdabfa5eca627724',
+          compressedBytes: 75_289_800,
+          uncompressedBytes: 220_000_000,
+          base: 'core',
+          includes: ['/usr/local/bin/claude'],
         },
         {
           id: 'python',
-          version: '3.11.8',
-          file: 'bundle-python-arm64.tar.zst',
-          sha256: '8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c',
-          compressedBytes: 32_000_000,
-          uncompressedBytes: 98_000_000,
+          version: '2026.09.2',
+          file: 'pocketdev-python-arm64-2026.09.2.tar.zst',
+          sha256: '6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85',
+          compressedBytes: 55_419_626,
+          uncompressedBytes: 142_127_360,
+          base: 'core',
           includes: ['/usr/bin/python3', '/usr/bin/pip3', '/usr/lib/python3.11'],
         },
         {
           id: 'android',
-          version: '35.0.0',
-          file: 'bundle-android-arm64.tar.zst',
-          sha256: '7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d',
-          compressedBytes: 85_000_000,
-          uncompressedBytes: 280_000_000,
-          includes: ['/opt/jdk-17', '/opt/android-sdk', '/opt/gradle'],
-        },
-        {
-          id: 'cpp',
-          version: '13.2.0',
-          file: 'bundle-cpp-arm64.tar.zst',
-          sha256: '6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e',
-          compressedBytes: 42_000_000,
-          uncompressedBytes: 140_000_000,
-          includes: ['/usr/bin/gcc', '/usr/bin/g++', '/usr/bin/make', '/usr/bin/cmake'],
-        },
-        {
-          id: 'php',
-          version: '8.3.0',
-          file: 'bundle-php-arm64.tar.zst',
-          sha256: '5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f',
-          compressedBytes: 24_000_000,
-          uncompressedBytes: 75_000_000,
-          includes: ['/usr/bin/php', '/usr/bin/composer'],
-        },
-        {
-          id: 'claude',
-          version: '0.2.32',
-          file: 'bundle-claude-arm64.tar.zst',
-          sha256: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a',
-          compressedBytes: 18_000_000,
-          uncompressedBytes: 52_000_000,
-          includes: ['/usr/local/bin/claude'],
+          version: '2026.09.1',
+          file: 'pocketdev-android-arm64-2026.09.1.tar.zst',
+          sha256: '01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6',
+          compressedBytes: 569_652_007,
+          uncompressedBytes: 866_703_360,
+          base: 'core',
+          includes: ['/root/android-sdk', '/opt/gradle', '/root/maven'],
         },
         {
           id: 'dsh',
-          version: '1.0.4',
-          file: 'bundle-dsh-arm64.tar.zst',
-          sha256: '3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b',
-          compressedBytes: 14_000_000,
-          uncompressedBytes: 44_000_000,
+          version: '2026.09.1',
+          file: 'pocketdev-dsh-arm64-2026.09.1.tar.zst',
+          sha256: '88e6a23ba74e1cd74a2c923b7e0d6bd78ba4b7e5f8a9b649f12bf4ffe158cce5',
+          compressedBytes: 27_752_194,
+          uncompressedBytes: 85_000_000,
+          base: 'core',
           includes: ['/usr/local/bin/dsh'],
         },
         {
           id: 'agy',
-          version: '2.0.0',
-          file: 'bundle-agy-arm64.tar.zst',
-          sha256: '2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6d5e4f3a2b1c',
-          compressedBytes: 22_000_000,
-          uncompressedBytes: 68_000_000,
-          includes: ['/usr/local/bin/agy'],
+          version: '2026.09.1',
+          file: 'pocketdev-agy-arm64-2026.09.1.tar.zst',
+          sha256: 'a659ab9188956fc4721ca86fb21b5118e0e489f47a5e02ae6b4f2fb423659d78',
+          compressedBytes: 41_870_025,
+          uncompressedBytes: 120_000_000,
+          base: 'core',
+          includes: ['/root/.local/bin/agy'],
         },
       ];
 
@@ -1996,13 +2254,37 @@ export class MobileHarnessToolchainManager {
         const downloaded = fs.existsSync(localPath);
         bundles.push({
           ...b,
-          downloadUrl: `https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.7/${b.file}`,
+          downloadUrl: `${OFFICIAL_RUNTIME_RELEASE_BASE_URL}/${b.file}`,
           downloaded,
           localPath: downloaded ? localPath : null,
           verifiedChecksum: false,
         });
       }
     }
+
+    // Standalone toolchain assets
+    const standaloneAssets: MobileHarnessStandaloneAsset[] = OFFICIAL_STANDALONE_TOOLCHAINS.map(
+      (asset) => {
+        const localPath = path.join(downloadsDir, asset.fileName);
+        const downloaded = fs.existsSync(localPath);
+        let verifiedChecksum = false;
+        if (downloaded && asset.sha256) {
+          try {
+            const buf = fs.readFileSync(localPath);
+            const hash = crypto.createHash('sha256').update(buf).digest('hex');
+            verifiedChecksum = hash.toLowerCase() === asset.sha256.toLowerCase();
+          } catch {
+            verifiedChecksum = false;
+          }
+        }
+        return {
+          ...asset,
+          downloaded,
+          localPath: downloaded ? localPath : null,
+          verifiedChecksum,
+        };
+      }
+    );
 
     // Read mobile-harness-update.json
     const updateJsonPath = path.join(activeRepoDir, 'mobile-harness-update.json');
@@ -2142,7 +2424,7 @@ export class MobileHarnessToolchainManager {
     }
 
     return {
-      repoUrl: 'https://github.com/techjarves/Mobile-Harness',
+      repoUrl: OFFICIAL_MOBILE_HARNESS_REPO_URL,
       repoDirectory: designatedDir,
       commitHash: '96b1da08d03af4f2d63970a3794c7fda068948c4',
       tag: 'v1.0.7',
@@ -2150,6 +2432,7 @@ export class MobileHarnessToolchainManager {
       manifestSchemaVersion: schemaVersion,
       architecture,
       bundles,
+      standaloneAssets,
       releaseVersionCode,
       releaseVersionName,
       releaseNotes,
@@ -2166,6 +2449,7 @@ export class MobileHarnessToolchainManager {
   async downloadRepositoryAsset(params: {
     variant?: 'online' | 'offline';
     bundleId?: string;
+    assetId?: string;
     signal?: AbortSignal;
   }): Promise<{
     success: boolean;
@@ -2182,7 +2466,7 @@ export class MobileHarnessToolchainManager {
     let targetFileName = '';
     let expectedSha256 = '';
     let requiredBytes = 0;
-    const toolId = params.variant || params.bundleId || 'toolchain-asset';
+    const toolId = params.variant || params.bundleId || params.assetId || 'toolchain-asset';
 
     if (params.variant) {
       const art = catalog.releaseArtifacts.find((a) => a.variant === params.variant);
@@ -2210,16 +2494,30 @@ export class MobileHarnessToolchainManager {
       }
       targetUrl =
         bundle.downloadUrl ||
-        `https://github.com/techjarves/Mobile-Harness/releases/download/v1.0.7/${bundle.file}`;
+        `${OFFICIAL_RUNTIME_RELEASE_BASE_URL}/${bundle.file}`;
       targetFileName = bundle.file;
       expectedSha256 = bundle.sha256;
       requiredBytes = bundle.compressedBytes;
+    } else if (params.assetId) {
+      const asset = catalog.standaloneAssets?.find((a) => a.id === params.assetId);
+      if (!asset) {
+        throw new ToolchainDownloadError({
+          toolId,
+          stage: 'RESOLVE_URL',
+          exceptionType: 'AssetNotFoundException',
+          actionableMessage: `Standalone asset '${params.assetId}' not found in catalog.`,
+        });
+      }
+      targetUrl = asset.url;
+      targetFileName = asset.fileName;
+      expectedSha256 = asset.sha256;
+      requiredBytes = asset.sizeBytes || 0;
     } else {
       throw new ToolchainDownloadError({
         toolId,
         stage: 'RESOLVE_URL',
         exceptionType: 'InvalidParametersException',
-        actionableMessage: 'Must specify variant or bundleId to download.',
+        actionableMessage: 'Must specify variant, bundleId, or assetId to download.',
       });
     }
 

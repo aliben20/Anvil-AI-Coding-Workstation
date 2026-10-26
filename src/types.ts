@@ -725,6 +725,19 @@ export interface MobileHarnessReleaseArtifact {
   verifiedChecksum?: boolean;
 }
 
+export interface MobileHarnessStandaloneAsset {
+  id: string;
+  name: string;
+  description: string;
+  url: string;
+  sha256: string;
+  sizeBytes?: number;
+  fileName: string;
+  downloaded: boolean;
+  localPath?: string | null;
+  verifiedChecksum?: boolean;
+}
+
 export interface MobileHarnessRepoResourceCatalog {
   repoUrl: string;
   repoDirectory: string;
@@ -734,6 +747,7 @@ export interface MobileHarnessRepoResourceCatalog {
   manifestSchemaVersion: number;
   architecture: string;
   bundles: MobileHarnessBundleSpec[];
+  standaloneAssets?: MobileHarnessStandaloneAsset[];
   releaseVersionCode: number;
   releaseVersionName: string;
   releaseNotes: string;

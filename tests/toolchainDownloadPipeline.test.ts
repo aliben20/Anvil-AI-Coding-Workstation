@@ -11,6 +11,10 @@ import {
   ToolchainDownloadError,
   MobileHarnessToolchainManager,
   MOBILE_HARNESS_TOOLCHAIN_SPECS,
+  OFFICIAL_RUNTIME_RELEASE_BASE_URL,
+  OFFICIAL_STANDALONE_TOOLCHAINS,
+  OFFICIAL_UPDATE_METADATA_URL,
+  OFFICIAL_RUNTIME_MANIFEST_URL,
 } from '../src/server/toolchainManager.js';
 
 const TEST_DIR = path.join(process.cwd(), '.anvil-data', 'test-toolchain-pipeline');
@@ -371,8 +375,10 @@ test('11. Mid-stream download cancellation and cleanup', async () => {
     });
     timer = setInterval(() => {
       try {
-        if (res.writable && !res.destroyed && !res.writableEnded) {
-          res.write(Buffer.alloc(2048, 'X'), () => {});
+        if (!res.destroyed && !res.writableEnded && res.writable) {
+          res.write(Buffer.alloc(2048, 'X'), (_err) => {
+            if (_err && timer) clearInterval(timer);
+          });
         } else if (timer) {
           clearInterval(timer);
         }
@@ -381,6 +387,7 @@ test('11. Mid-stream download cancellation and cleanup', async () => {
       }
     }, 20);
     req.on('close', () => { if (timer) clearInterval(timer); });
+    req.on('aborted', () => { if (timer) clearInterval(timer); });
     res.on('close', () => { if (timer) clearInterval(timer); });
     res.on('error', () => { if (timer) clearInterval(timer); });
     req.socket?.on('error', () => { if (timer) clearInterval(timer); });
@@ -528,4 +535,134 @@ test('15. Archive extraction failure rolls back without corrupting existing inst
     'ORIGINAL_VERSION_1.0',
     'Working installation must not be corrupted by failed update'
   );
+});
+
+test('16. Authoritative Mobile-Harness runtime release URLs and bundle catalog validation', () => {
+  const testDataDir = path.join(TEST_DIR, 'mh-catalog-test');
+  fs.mkdirSync(testDataDir, { recursive: true });
+  const mgr = new MobileHarnessToolchainManager(testDataDir);
+  const catalog = mgr.getMobileHarnessResources();
+
+  assert.ok(catalog);
+  assert.ok(Array.isArray(catalog.bundles));
+  assert.ok(catalog.bundles.length >= 6);
+
+  // 1. Verify every bundle downloadUrl uses the authoritative runtime release tag, NOT v1.0.7
+  for (const bundle of catalog.bundles) {
+    assert.ok(bundle.downloadUrl, `Bundle ${bundle.id} must have a valid downloadUrl`);
+    assert.ok(
+      bundle.downloadUrl.includes('runtime-2026.09.4'),
+      `Bundle ${bundle.id} URL (${bundle.downloadUrl}) must point to runtime-2026.09.4 release, not v1.0.7`
+    );
+    assert.ok(
+      !bundle.downloadUrl.includes('/v1.0.7/'),
+      `Bundle ${bundle.id} URL must not incorrectly use application release tag v1.0.7`
+    );
+  }
+
+  // 2. Verify authentic filenames and authentic SHA-256 hashes matching upstream Mobile Harness
+  const coreBundle = catalog.bundles.find((b) => b.id === 'core');
+  assert.ok(coreBundle);
+  assert.equal(coreBundle.file, 'pocketdev-core-arm64-2026.09.5.tar.zst');
+  assert.equal(
+    coreBundle.sha256.toLowerCase(),
+    'df0cf7251c74f82d424231e3804114a4ca66b16130eea9abab11e220dc7ac012'
+  );
+  assert.equal(coreBundle.compressedBytes, 72185773);
+
+  const pythonBundle = catalog.bundles.find((b) => b.id === 'python');
+  assert.ok(pythonBundle);
+  assert.equal(pythonBundle.file, 'pocketdev-python-arm64-2026.09.2.tar.zst');
+  assert.equal(
+    pythonBundle.sha256.toLowerCase(),
+    '6b3f56f7743fec142bc045db3ea561ee83fe89af87c2799165ef60351164ef85'
+  );
+  assert.equal(pythonBundle.compressedBytes, 55419626);
+
+  const androidBundle = catalog.bundles.find((b) => b.id === 'android');
+  assert.ok(androidBundle);
+  assert.equal(androidBundle.file, 'pocketdev-android-arm64-2026.09.1.tar.zst');
+  assert.equal(
+    androidBundle.sha256.toLowerCase(),
+    '01bea058ebcb17416d1eb08c0211b3782da3228eb3c8348eb3719f2d61dd3ec6'
+  );
+  assert.equal(androidBundle.compressedBytes, 569652007);
+});
+
+test('17. Standalone Android toolchains and SDK archives are distinct from application APKs', () => {
+  const testDataDir = path.join(TEST_DIR, 'mh-standalone-test');
+  fs.mkdirSync(testDataDir, { recursive: true });
+  const mgr = new MobileHarnessToolchainManager(testDataDir);
+  const catalog = mgr.getMobileHarnessResources();
+
+  // Standalone toolchains catalog check
+  assert.ok(Array.isArray(catalog.standaloneAssets));
+  const sdkAsset = catalog.standaloneAssets.find((a) => a.id === 'android-sdk-arm64');
+  assert.ok(sdkAsset);
+  assert.equal(sdkAsset.url, 'https://appdevforall.org/dev-assets/debug/android-sdk-arm64-v8a.zip');
+  assert.equal(
+    sdkAsset.sha256,
+    'bfe5bc940a7ede14735817a40962256666ce4152b9f3135f34a4ab9bccb87c3f'
+  );
+
+  const gradleAsset = catalog.standaloneAssets.find((a) => a.id === 'gradle-8.14.3');
+  assert.ok(gradleAsset);
+  assert.equal(gradleAsset.url, 'https://appdevforall.org/dev-assets/debug/gradle-8.14.3-bin.zip');
+  assert.equal(
+    gradleAsset.sha256,
+    '8e228b640319a7c739c0a93d002facdeb08e8f3ba394d57d74ee355a5e93072c'
+  );
+
+  // Application update APKs must be cleanly separated
+  assert.ok(Array.isArray(catalog.releaseArtifacts));
+  for (const art of catalog.releaseArtifacts) {
+    assert.ok(art.url.endsWith('.apk'), `Release artifact must be an APK: ${art.url}`);
+    assert.ok(
+      !art.url.includes('android-sdk'),
+      'Application update APK must not be used as toolchain bundle'
+    );
+  }
+});
+
+test('18. Error dismissal and diagnostic clearing (clearToolchainError)', () => {
+  const testDataDir = path.join(TEST_DIR, 'mh-clear-error-test');
+  fs.mkdirSync(testDataDir, { recursive: true });
+  const mgr = new MobileHarnessToolchainManager(testDataDir);
+
+  // Simulate an error on python toolchain
+  const statusBefore = mgr.getFullStatus();
+  assert.ok(statusBefore);
+
+  // Inject a simulated failure
+  mgr['state'].toolchainStatuses['python'] = {
+    installed: false,
+    installedVersion: null,
+    verifiedAtMillis: null,
+    lastError: 'HTTP 404: Package artifact not found',
+    diagnostic: {
+      toolId: 'python',
+      stage: 'HTTP_REQUEST',
+      httpStatus: 404,
+      exceptionType: 'HttpNotFoundException',
+      actionableMessage: 'HTTP 404: Package artifact not found',
+      timestamp: Date.now(),
+    },
+  };
+  mgr['saveState']();
+
+  const statusWithError = mgr.getFullStatus();
+  const pyItem = statusWithError.toolchains.find((t) => t.id === 'python');
+  assert.ok(pyItem);
+  assert.equal(pyItem.lastError, 'HTTP 404: Package artifact not found');
+  assert.ok(pyItem.diagnostic);
+  assert.equal(pyItem.diagnostic.httpStatus, 404);
+
+  // Clear error
+  mgr.clearToolchainError('python');
+
+  const statusAfterClear = mgr.getFullStatus();
+  const pyItemCleared = statusAfterClear.toolchains.find((t) => t.id === 'python');
+  assert.ok(pyItemCleared);
+  assert.equal(pyItemCleared.lastError, null);
+  assert.equal(pyItemCleared.diagnostic, null);
 });

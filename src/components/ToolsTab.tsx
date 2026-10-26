@@ -35,6 +35,8 @@ import {
   Settings2,
   ExternalLink,
   Shield,
+  FileText,
+  Info,
 } from 'lucide-react';
 import {
   AgentActivityEvent,
@@ -52,6 +54,8 @@ import {
   AgentToolIntegration,
   AgentIntegrationId,
   IntegrationLifecycleState,
+  ToolchainDiagnosticStage,
+  ToolchainDiagnosticReport,
 } from '../types';
 
 interface ToolsTabProps {
@@ -136,6 +140,135 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
 
   // Toast Banner
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Diagnostic Error Details Modal State
+  const [errorModalData, setErrorModalData] = useState<{
+    toolId?: string;
+    title: string;
+    stage: ToolchainDiagnosticStage | string;
+    httpStatus?: number | null;
+    exceptionType?: string;
+    message: string;
+    url?: string | null;
+    targetPath?: string | null;
+    expectedChecksum?: string | null;
+    actualChecksum?: string | null;
+    requiredBytes?: number | null;
+    availableBytes?: number | null;
+    timestamp: number;
+    canRetry: boolean;
+    retryAction?: () => void;
+  } | null>(null);
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState(false);
+
+  const handleOpenErrorDetails = (tc: ToolchainItemState) => {
+    const diag = tc.diagnostic;
+    setErrorModalData({
+      toolId: tc.id,
+      title: `${tc.title} Diagnostic Details`,
+      stage: diag?.stage || 'ENVIRONMENT_PROBE',
+      httpStatus: diag?.httpStatus,
+      exceptionType: diag?.exceptionType || 'InstallationError',
+      message:
+        diag?.actionableMessage ||
+        tc.lastError ||
+        'An error occurred during toolchain installation or verification.',
+      url: diag?.url,
+      targetPath: diag?.targetPath,
+      expectedChecksum: diag?.expectedChecksum,
+      actualChecksum: diag?.actualChecksum,
+      requiredBytes: diag?.requiredBytes,
+      availableBytes: diag?.availableBytes,
+      timestamp: diag?.timestamp || Date.now(),
+      canRetry: true,
+      retryAction: () =>
+        handleInstallToolchain(tc.id, tc.status === 'updating' ? 'update' : 'install'),
+    });
+  };
+
+  const handleOpenJobErrorDetails = (job: ToolchainJobProgress) => {
+    const diag = job.diagnostic;
+    setErrorModalData({
+      toolId: job.currentToolchainId || 'toolchain-job',
+      title: `Job Failed: ${job.currentComponent || job.currentToolchainId || 'Toolchain Operation'}`,
+      stage: diag?.stage || 'JOB_EXECUTION',
+      httpStatus: diag?.httpStatus,
+      exceptionType: diag?.exceptionType || 'JobExecutionError',
+      message:
+        job.errorMessage || diag?.actionableMessage || job.stageMessage || 'Toolchain operation failed.',
+      url: diag?.url,
+      targetPath: diag?.targetPath,
+      expectedChecksum: diag?.expectedChecksum,
+      actualChecksum: diag?.actualChecksum,
+      requiredBytes: diag?.requiredBytes,
+      availableBytes: diag?.availableBytes,
+      timestamp: diag?.timestamp || job.finishedAtMillis || Date.now(),
+      canRetry: job.canRetry,
+      retryAction: job.currentToolchainId
+        ? () => {
+            if (job.operation === 'uninstall') {
+              handleUninstallToolchain(job.currentToolchainId!);
+            } else {
+              handleInstallToolchain(
+                job.currentToolchainId!,
+                job.operation === 'update' ? 'update' : 'install'
+              );
+            }
+          }
+        : undefined,
+    });
+  };
+
+  const handleDismissError = async (toolId?: string) => {
+    if (toolId) {
+      try {
+        await fetch(`/api/toolchains/${encodeURIComponent(toolId)}/clear-error`, {
+          method: 'POST',
+        });
+      } catch {
+        // ignore
+      }
+      setToolchains((prev) =>
+        prev.map((t) =>
+          t.id === toolId
+            ? { ...t, lastError: null, diagnostic: null, status: 'not_installed' }
+            : t
+        )
+      );
+    }
+    if (activeJob && activeJob.status === 'failed') {
+      setActiveJob((prev) =>
+        prev ? { ...prev, status: 'idle', errorMessage: undefined, diagnostic: null } : null
+      );
+    }
+    setErrorModalData(null);
+  };
+
+  const handleCopyDiagnostics = () => {
+    if (!errorModalData) return;
+    const cleanReport = {
+      toolId: errorModalData.toolId,
+      title: errorModalData.title,
+      stage: errorModalData.stage,
+      httpStatus: errorModalData.httpStatus,
+      exceptionType: errorModalData.exceptionType,
+      actionableMessage: errorModalData.message,
+      targetPath: errorModalData.targetPath,
+      url: errorModalData.url?.replace(/([?&](?:token|key|secret|auth)=)[^&]+/gi, '$1[REDACTED]'),
+      expectedChecksum: errorModalData.expectedChecksum,
+      actualChecksum: errorModalData.actualChecksum,
+      requiredBytes: errorModalData.requiredBytes,
+      availableBytes: errorModalData.availableBytes,
+      timestamp: new Date(errorModalData.timestamp).toISOString(),
+    };
+    navigator.clipboard.writeText(JSON.stringify(cleanReport, null, 2));
+    setCopiedDiagnostics(true);
+    setTimeout(() => setCopiedDiagnostics(false), 2000);
+  };
+
+  const handleOpenDocumentation = () => {
+    window.open('https://github.com/techjarves/Mobile-Harness', '_blank', 'noopener,noreferrer');
+  };
 
   // Load Toolchains
   const loadToolchains = useCallback(async () => {
@@ -755,6 +888,88 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
               </div>
             )}
 
+            {/* Active Job Failed Card with interactive touch target & details trigger (Bug B Repair) */}
+            {activeJob && activeJob.status === 'failed' && (
+              <div
+                onClick={() => handleOpenJobErrorDetails(activeJob)}
+                role="button"
+                tabIndex={0}
+                aria-label="View failed installation error details"
+                className="p-4 rounded-2xl bg-[#FF727A]/10 border border-[#FF727A]/40 space-y-2.5 transition-all hover:bg-[#FF727A]/15 cursor-pointer animate-in fade-in duration-150"
+              >
+                <div className="flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-[#FF727A] shrink-0" />
+                    <span className="font-bold text-[#F0F6FC]">
+                      {activeJob.operation === 'install'
+                        ? 'Installation Failed'
+                        : activeJob.operation === 'update'
+                        ? 'Update Failed'
+                        : 'Uninstallation Failed'}
+                    </span>
+                    <span className="font-mono text-[#8B949E]">{activeJob.currentToolchainId}</span>
+                  </div>
+                  {activeJob.diagnostic?.stage && (
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#FF727A]/20 text-[#FF727A] border border-[#FF727A]/30">
+                      {activeJob.diagnostic.stage}
+                    </span>
+                  )}
+                </div>
+
+                <div className="text-xs text-[#F0F6FC]/90 font-mono line-clamp-2">
+                  {activeJob.errorMessage || activeJob.stageMessage || 'An unexpected error occurred during installation.'}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[#FF727A]/20">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenJobErrorDetails(activeJob);
+                    }}
+                    className="min-h-[44px] px-3.5 py-1.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#FF727A] font-semibold text-xs flex items-center gap-1.5 border border-[#FF727A]/30 transition-colors cursor-pointer"
+                    title="View error diagnostics, HTTP status, and resolution"
+                  >
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>View Error Details</span>
+                  </button>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDismissError(activeJob.currentToolchainId || undefined);
+                      }}
+                      className="min-h-[44px] px-3.5 py-1.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] font-semibold text-xs transition-colors cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                    {activeJob.currentToolchainId && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (activeJob.operation === 'uninstall') {
+                            handleUninstallToolchain(activeJob.currentToolchainId!);
+                          } else {
+                            handleInstallToolchain(
+                              activeJob.currentToolchainId!,
+                              activeJob.operation === 'update' ? 'update' : 'install'
+                            );
+                          }
+                        }}
+                        className="min-h-[44px] px-4 py-1.5 rounded-xl bg-[#C7FF65] text-[#0D1117] font-bold text-xs flex items-center gap-1.5 hover:bg-[#d6ff85] transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Retry</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Platform & Disk Compatibility Strip */}
             {compatibility && diskSpace && (
               <div className="p-3 sm:p-4 rounded-2xl bg-[#161B22] border border-[#30363D] grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
@@ -842,22 +1057,35 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
 
                       {/* Status Badge + Actions */}
                       <div className="flex items-center gap-2 shrink-0 pt-2 sm:pt-0 border-t sm:border-t-0 border-[#30363D]/60 justify-between sm:justify-end">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${
-                            isInstalled
-                              ? 'bg-[#72D9A0]/15 text-[#72D9A0] border border-[#72D9A0]/30'
-                              : isInstalling || isUpdating
-                              ? 'bg-[#388BFD]/15 text-[#388BFD] border border-[#388BFD]/30'
-                              : isFailed
-                              ? 'bg-[#FF727A]/15 text-[#FF727A] border border-[#FF727A]/30'
-                              : 'bg-[#21262D] text-[#8B949E] border border-[#30363D]'
-                          }`}
-                        >
-                          {isInstalled && <CheckCircle2 className="w-3.5 h-3.5" />}
-                          {(isInstalling || isUpdating) && <span className="w-2 h-2 rounded-full bg-[#388BFD] animate-pulse" />}
-                          {isFailed && <AlertTriangle className="w-3.5 h-3.5" />}
-                          <span>{isInstalled ? 'Installed' : isInstalling ? 'Installing...' : isUpdating ? 'Updating...' : isFailed ? 'Failed' : 'Available'}</span>
-                        </span>
+                        {isFailed ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenErrorDetails(tc);
+                            }}
+                            title="Tappable: View error details and diagnostics"
+                            aria-label={`View error diagnostic details for ${tc.title}`}
+                            className="min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 bg-[#FF727A]/20 hover:bg-[#FF727A]/30 text-[#FF727A] border border-[#FF727A]/40 transition-colors cursor-pointer"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Failed · Details</span>
+                          </button>
+                        ) : (
+                          <span
+                            className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${
+                              isInstalled
+                                ? 'bg-[#72D9A0]/15 text-[#72D9A0] border border-[#72D9A0]/30'
+                                : isInstalling || isUpdating
+                                ? 'bg-[#388BFD]/15 text-[#388BFD] border border-[#388BFD]/30'
+                                : 'bg-[#21262D] text-[#8B949E] border border-[#30363D]'
+                            }`}
+                          >
+                            {isInstalled && <CheckCircle2 className="w-3.5 h-3.5" />}
+                            {(isInstalling || isUpdating) && <span className="w-2 h-2 rounded-full bg-[#388BFD] animate-pulse" />}
+                            <span>{isInstalled ? 'Installed' : isInstalling ? 'Installing...' : isUpdating ? 'Updating...' : 'Available'}</span>
+                          </span>
+                        )}
 
                         {/* Action Buttons */}
                         <div className="flex items-center gap-1.5">
@@ -935,6 +1163,32 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                       </div>
                     </div>
 
+                    {/* Interactive Error Strip if toolchain has failure (Bug B Repair) */}
+                    {tc.lastError && (
+                      <div
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenErrorDetails(tc);
+                        }}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`View diagnostic error details for ${tc.title}`}
+                        className="mx-4 mb-3 p-3 rounded-xl bg-[#FF727A]/10 border border-[#FF727A]/30 hover:border-[#FF727A]/60 text-[#FF727A] flex items-center justify-between gap-3 cursor-pointer transition-colors min-h-[44px]"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <AlertTriangle className="w-4 h-4 shrink-0 text-[#FF727A]" />
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-[#F0F6FC] truncate">Installation / Verification Failed</div>
+                            <div className="text-[11px] text-[#FF727A] truncate font-mono">{tc.lastError}</div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 text-xs font-semibold shrink-0 text-[#FF727A]">
+                          <span>Inspect</span>
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        </div>
+                      </div>
+                    )}
+
                     {/* Expanded Technical Details */}
                     {isExpanded && (
                       <div className="px-4 pb-4 pt-2 border-t border-[#30363D]/60 bg-[#0D1117] space-y-3 text-xs">
@@ -942,19 +1196,47 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
 
                         {/* Error box if failed */}
                         {tc.lastError && (
-                          <div className="p-3 rounded-xl bg-[#FF727A]/10 border border-[#FF727A]/30 text-[#FF727A] space-y-1">
-                            <div className="font-bold flex items-center gap-1.5">
-                              <AlertTriangle className="w-3.5 h-3.5" />
-                              <span>Error during operation</span>
+                          <div className="p-3.5 rounded-xl bg-[#FF727A]/10 border border-[#FF727A]/30 text-[#FF727A] space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <div className="font-bold flex items-center gap-1.5 text-xs text-[#F0F6FC]">
+                                <AlertTriangle className="w-4 h-4 text-[#FF727A]" />
+                                <span>Toolchain Operation Failed</span>
+                              </div>
+                              {tc.diagnostic?.stage && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#FF727A]/20 text-[#FF727A]">
+                                  {tc.diagnostic.stage}
+                                </span>
+                              )}
                             </div>
-                            <pre className="font-mono text-[11px] whitespace-pre-wrap">{tc.lastError}</pre>
-                            <button
-                              type="button"
-                              onClick={() => handleInstallToolchain(tc.id, 'install')}
-                              className="mt-1 px-3 py-1 rounded bg-[#FF727A]/20 hover:bg-[#FF727A]/30 font-semibold text-[11px] text-[#FF727A]"
-                            >
-                              Retry Installation
-                            </button>
+                            <pre className="font-mono text-[11px] whitespace-pre-wrap leading-relaxed text-[#FF727A]">
+                              {tc.lastError}
+                            </pre>
+                            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#FF727A]/20">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenErrorDetails(tc)}
+                                className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#21262D] hover:bg-[#30363D] text-[#FF727A] font-semibold text-xs flex items-center gap-1.5 border border-[#FF727A]/40 cursor-pointer"
+                              >
+                                <FileText className="w-3.5 h-3.5" />
+                                <span>Inspect Diagnostics Modal</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleInstallToolchain(tc.id, 'install')}
+                                disabled={isActionBusy || isInstalling}
+                                className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#C7FF65] hover:bg-[#d6ff85] font-bold text-xs text-[#0D1117] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                <span>Retry Installation</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDismissError(tc.id)}
+                                className="min-h-[44px] px-3 py-1.5 rounded-lg bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] font-semibold text-xs cursor-pointer"
+                              >
+                                Dismiss Error
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -1766,6 +2048,189 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          ERROR DETAILS & DIAGNOSTICS MODAL (Bug B Repair)
+          ========================================================================= */}
+      {errorModalData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm"
+            onClick={() => setErrorModalData(null)}
+          />
+          <div className="relative w-full max-w-lg bg-[#161B22] border border-[#FF727A]/40 rounded-2xl shadow-2xl p-5 sm:p-6 space-y-4 z-10 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between pb-3 border-b border-[#30363D] gap-3">
+              <div className="space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="w-7 h-7 rounded-lg bg-[#FF727A]/15 border border-[#FF727A]/30 flex items-center justify-center shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-[#FF727A]" />
+                  </div>
+                  <h3 className="font-bold text-sm sm:text-base text-[#F0F6FC] truncate">
+                    {errorModalData.title}
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono">
+                  <span className="px-2 py-0.5 rounded bg-[#FF727A]/20 text-[#FF727A] border border-[#FF727A]/30 font-semibold">
+                    Stage: {errorModalData.stage}
+                  </span>
+                  {errorModalData.httpStatus && (
+                    <span className="px-2 py-0.5 rounded bg-[#388BFD]/20 text-[#58A6FF] border border-[#388BFD]/30 font-semibold">
+                      HTTP {errorModalData.httpStatus}
+                    </span>
+                  )}
+                  {errorModalData.exceptionType && (
+                    <span className="px-2 py-0.5 rounded bg-[#21262D] text-[#8B949E] border border-[#30363D]">
+                      {errorModalData.exceptionType}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setErrorModalData(null)}
+                title="Close error details"
+                aria-label="Close error details modal"
+                className="min-h-[44px] min-w-[44px] p-2 text-[#8B949E] hover:text-[#F0F6FC] rounded-xl bg-[#21262D] hover:bg-[#30363D] flex items-center justify-center cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Actionable Error Message */}
+            <div className="p-3.5 rounded-xl bg-[#FF727A]/10 border border-[#FF727A]/30 space-y-1.5">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#FF727A] flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5" />
+                <span>Actionable Diagnosis</span>
+              </div>
+              <p className="text-xs text-[#F0F6FC] leading-relaxed whitespace-pre-wrap font-mono">
+                {errorModalData.message}
+              </p>
+            </div>
+
+            {/* Diagnostic Metadata breakdown */}
+            <div className="p-3.5 rounded-xl bg-[#0D1117] border border-[#30363D] space-y-2 text-xs font-mono">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-[#8B949E] pb-1 border-b border-[#30363D]/60">
+                Diagnostic Metadata
+              </div>
+
+              {errorModalData.url && (
+                <div className="space-y-0.5">
+                  <span className="text-[#8B949E] text-[10px] block">Source URL:</span>
+                  <span className="text-[#58A6FF] break-all select-all text-[11px]">
+                    {errorModalData.url}
+                  </span>
+                </div>
+              )}
+
+              {errorModalData.targetPath && (
+                <div className="space-y-0.5">
+                  <span className="text-[#8B949E] text-[10px] block">Destination Path:</span>
+                  <span className="text-[#F0F6FC] break-all select-all text-[11px]">
+                    {errorModalData.targetPath}
+                  </span>
+                </div>
+              )}
+
+              {errorModalData.expectedChecksum && (
+                <div className="space-y-1 pt-1">
+                  <div className="space-y-0.5">
+                    <span className="text-[#8B949E] text-[10px] block">Expected SHA-256:</span>
+                    <span className="text-[#72D9A0] break-all select-all text-[11px]">
+                      {errorModalData.expectedChecksum}
+                    </span>
+                  </div>
+                  {errorModalData.actualChecksum && (
+                    <div className="space-y-0.5">
+                      <span className="text-[#8B949E] text-[10px] block">Actual Received SHA-256:</span>
+                      <span className="text-[#FF727A] break-all select-all text-[11px]">
+                        {errorModalData.actualChecksum}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {errorModalData.requiredBytes !== undefined && errorModalData.requiredBytes !== null && (
+                <div className="flex items-center justify-between text-[11px] pt-1 border-t border-[#30363D]/40">
+                  <span className="text-[#8B949E]">Required Space:</span>
+                  <span className="text-[#F0F6FC]">
+                    {(errorModalData.requiredBytes / (1024 * 1024)).toFixed(1)} MB
+                  </span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between text-[11px] pt-1 border-t border-[#30363D]/40">
+                <span className="text-[#8B949E]">Timestamp:</span>
+                <span className="text-[#8B949E]">
+                  {new Date(errorModalData.timestamp).toLocaleTimeString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Action Buttons Row */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 pt-3 border-t border-[#30363D]">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyDiagnostics}
+                  className="min-h-[44px] px-3.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#F0F6FC] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer flex-1 sm:flex-initial"
+                  title="Copy redacted diagnostic JSON to clipboard"
+                >
+                  {copiedDiagnostics ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-[#72D9A0]" />
+                      <span className="text-[#72D9A0]">Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>Copy Diagnostics</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenDocumentation}
+                  className="min-h-[44px] px-3.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer flex-1 sm:flex-initial"
+                  title="Open Mobile Harness upstream repository & documentation"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Upstream Docs</span>
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDismissError(errorModalData.toolId)}
+                  className="min-h-[44px] px-4 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-semibold transition-colors cursor-pointer flex-1 sm:flex-initial"
+                >
+                  Dismiss
+                </button>
+
+                {errorModalData.canRetry && errorModalData.retryAction && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const act = errorModalData.retryAction;
+                      setErrorModalData(null);
+                      act?.();
+                    }}
+                    disabled={activeJob?.status === 'running'}
+                    className="min-h-[44px] px-5 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 flex-1 sm:flex-initial"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Retry Download</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
