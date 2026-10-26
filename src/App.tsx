@@ -181,6 +181,7 @@ export function App() {
     }
     return true;
   });
+  const [agentsSubView, setAgentsSubView] = useState<'loop' | 'tasks' | 'agents' | 'memory' | 'duet'>('loop');
   const [subagentTasks, setSubagentTasks] = useState<SubAgentTask[]>([]);
   const prevTasksRef = useRef<Map<string, SubAgentTask>>(new Map());
   const prevApprovalsCountRef = useRef(0);
@@ -225,9 +226,15 @@ export function App() {
 
     window.addEventListener('obsidian-overlay-permission', handleOverlayPermission);
     window.addEventListener('obsidian-overlay-dismissed', handleOverlayDismissed);
+
+    (window as any).__obsidianNavigateTab = (tab: TabDestination) => {
+      if (tab) setActiveTab(tab);
+    };
+
     return () => {
       window.removeEventListener('obsidian-overlay-permission', handleOverlayPermission);
       window.removeEventListener('obsidian-overlay-dismissed', handleOverlayDismissed);
+      delete (window as any).__obsidianNavigateTab;
     };
   }, [floatingBubbleEnabled, nativeOverlaySupported]);
 
@@ -1547,6 +1554,21 @@ export function App() {
                   setActiveTab('terminal');
                 }}
                 onNavigateToAgents={(fileContext?: string) => {
+                  setAgentsSubView('loop');
+                  if (fileContext && activeConv) {
+                    handleUpdateConversationMeta(activeConv.id, { chatMode: 'agent' });
+                  }
+                  setActiveTab('agents');
+                }}
+                onNavigateToAgentLoop={(fileContext?: string) => {
+                  setAgentsSubView('loop');
+                  if (fileContext && activeConv) {
+                    handleUpdateConversationMeta(activeConv.id, { chatMode: 'agent' });
+                  }
+                  setActiveTab('agents');
+                }}
+                onNavigateToDuet={(fileContext?: string) => {
+                  setAgentsSubView('duet');
                   if (fileContext && activeConv) {
                     handleUpdateConversationMeta(activeConv.id, { chatMode: 'agent' });
                   }
@@ -1617,6 +1639,8 @@ export function App() {
           {activeTab === 'agents' && (
             <TabErrorBoundary>
               <AgentsTab
+                key={`agents-tab-${agentsSubView}`}
+                defaultSubView={agentsSubView}
                 activeWorkspaceId={activeWorkspaceId}
                 conversationId={activeConv?.id}
                 onSelectConversation={(id) => setActiveConvId(id)}

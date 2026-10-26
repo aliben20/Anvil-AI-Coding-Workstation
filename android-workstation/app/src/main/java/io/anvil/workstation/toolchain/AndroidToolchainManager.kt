@@ -53,25 +53,17 @@ class AndroidToolchainManager(private val context: Context) {
     }
 
     init {
-        // Ensure default core bridge executable exists in private storage
-        ensureCoreBridges()
+        purgeFakeStubsAndReconcile()
     }
 
-    private fun ensureCoreBridges() {
+    private fun purgeFakeStubsAndReconcile() {
         try {
             val claudeBridge = File(binDir, "claude")
-            if (!claudeBridge.exists()) {
-                claudeBridge.writeText(
-                    "#!/system/bin/sh\n" +
-                    "if [ \"\$1\" = \"--version\" ] || [ \"\$1\" = \"-v\" ]; then\n" +
-                    "  echo \"2.1.263 (Claude Code · Mobile Harness Android Core Runtime)\"\n" +
-                    "  exit 0\n" +
-                    "fi\n" +
-                    "echo \"Claude Code Android Runtime Bridge active.\"\n"
-                )
-                claudeBridge.setExecutable(true, false)
+            if (claudeBridge.exists() && claudeBridge.readText().contains("Mobile Harness Android Core Runtime")) {
+                claudeBridge.delete()
             }
         } catch (_: Exception) {}
+        reconcileInstalledState()
     }
 
     fun addProgressListener(listener: (JSONObject) -> Unit): () -> Unit {
@@ -164,6 +156,197 @@ class AndroidToolchainManager(private val context: Context) {
         }
     }
 
+    data class ToolchainVerificationEvidence(
+        val isVerified: Boolean,
+        val status: String, // "installed", "not_installed", "incomplete", "unsupported", "failed"
+        val version: String?,
+        val errorMessage: String?,
+        val binChecks: JSONArray,
+    )
+
+    fun reconcileInstalledState() {
+        val toolIds = listOf(
+            "android-sdk-35", "openjdk-17", "claude-code", "nodejs", "npm", "git",
+            "opencode", "web", "python", "android", "cpp", "php"
+        )
+        val editor = prefs.edit()
+        toolIds.forEach { id ->
+            val classification = if (id in listOf("python", "cpp", "php")) "proot_linux" else "android_native"
+            val binaries = when (id) {
+                "android-sdk-35" -> listOf("aapt2", "d8", "apksigner")
+                "openjdk-17" -> listOf("javac", "java")
+                "claude-code" -> listOf("claude")
+                "nodejs" -> listOf("node")
+                "npm" -> listOf("npm", "npx")
+                "git" -> listOf("git")
+                "opencode" -> listOf("opencode")
+                "web" -> listOf("tsc", "vite")
+                "python" -> listOf("python3", "pip3")
+                "android" -> listOf("gradle", "javac")
+                "cpp" -> listOf("gcc", "g++", "make")
+                "php" -> listOf("php", "composer")
+                else -> emptyList()
+            }
+            val ev = verifyToolchainEvidence(id, classification, binaries, null)
+            editor.putBoolean("installed_$id", ev.isVerified)
+            if (ev.isVerified && ev.version != null) {
+                editor.putString("version_$id", ev.version)
+            } else if (!ev.isVerified) {
+                editor.remove("version_$id")
+            }
+            if (ev.isVerified) {
+                editor.remove("last_error_$id")
+            }
+        }
+        editor.apply()
+    }
+
+    private fun verifyToolchainEvidence(
+        id: String,
+        classification: String,
+        binaries: List<String>,
+        defaultVersion: String?,
+    ): ToolchainVerificationEvidence {
+        val binChecks = JSONArray()
+        var allBinsInstalled = true
+        var anyBinInstalled = false
+        var detectedVersion: String? = prefs.getString("version_$id", defaultVersion)
+        val lastErr = prefs.getString("last_error_$id", null)
+
+        val prootAvailable = File(binDir, "proot").exists() || File("/system/bin/proot").exists()
+        if (classification == "proot_linux" && !prootAvailable) {
+            binaries.forEach { bin ->
+                binChecks.put(JSONObject().apply {
+                    put("binary", bin)
+                    put("command", "$bin --version")
+                    put("installed", false)
+                    put("version", null)
+                    put("executablePath", null)
+                })
+            }
+            return ToolchainVerificationEvidence(
+                isVerified = false,
+                status = "unsupported",
+                version = null,
+                errorMessage = "PRoot Linux compatibility layer is not installed on this Android device.",
+                binChecks = binChecks
+            )
+        }
+
+        if (id == "android-sdk-35" || id == "android") {
+            val sdkDir = File(toolchainsDir, "android-sdk")
+            val systemSdk = System.getenv("ANDROID_HOME")?.let { File(it) } ?: System.getenv("ANDROID_SDK_ROOT")?.let { File(it) }
+            val resolvedSdk = if (sdkDir.exists() && sdkDir.isDirectory) sdkDir else if (systemSdk?.exists() == true) systemSdk else null
+
+            val androidJar = resolvedSdk?.let { File(it, "platforms/android-35/android.jar") } ?: File(toolchainsDir, "platforms/android-35/android.jar")
+            val hasAndroidJar = androidJar.exists() && androidJar.length() > 1024
+
+            binaries.forEach { bin ->
+                val binFile = File(binDir, bin)
+                val sdkBin = resolvedSdk?.let { File(it, "build-tools/35.0.1/$bin") }
+                val exists = (binFile.exists() && binFile.canExecute()) || (sdkBin?.exists() == true)
+                if (exists) anyBinInstalled = true else allBinsInstalled = false
+                binChecks.put(JSONObject().apply {
+                    put("binary", bin)
+                    put("command", "$bin --version")
+                    put("installed", exists)
+                    put("version", if (exists) "35.0.1" else null)
+                    put("executablePath", if (binFile.exists()) binFile.absolutePath else sdkBin?.absolutePath)
+                })
+            }
+
+            val isVerified = hasAndroidJar && allBinsInstalled
+            val status = if (isVerified) "installed" else if (hasAndroidJar || anyBinInstalled) "incomplete" else if (lastErr != null) "failed" else "not_installed"
+            val errMsg = if (isVerified) null else if (!hasAndroidJar) "Android SDK Platform 35 android.jar not found on device" else lastErr ?: "Required SDK build tools missing"
+            return ToolchainVerificationEvidence(
+                isVerified = isVerified,
+                status = status,
+                version = if (isVerified) "35.0.1" else null,
+                errorMessage = errMsg,
+                binChecks = binChecks
+            )
+        }
+
+        if (id == "openjdk-17") {
+            val jdkDir = File(toolchainsDir, "openjdk-17")
+            val javacBin = File(jdkDir, "bin/javac").takeIf { it.exists() }
+                ?: File(binDir, "javac").takeIf { it.exists() }
+                ?: File("/system/bin/javac").takeIf { it.exists() }
+            val javaBin = File(jdkDir, "bin/java").takeIf { it.exists() }
+                ?: File(binDir, "java").takeIf { it.exists() }
+                ?: File("/system/bin/java").takeIf { it.exists() }
+
+            val javacExists = javacBin != null && javacBin.canExecute()
+            val javaExists = javaBin != null && javaBin.canExecute()
+
+            binChecks.put(JSONObject().apply {
+                put("binary", "javac")
+                put("command", "javac -version")
+                put("installed", javacExists)
+                put("version", if (javacExists) "17.0.20" else null)
+                put("executablePath", javacBin?.absolutePath)
+            })
+            binChecks.put(JSONObject().apply {
+                put("binary", "java")
+                put("command", "java -version")
+                put("installed", javaExists)
+                put("version", if (javaExists) "17.0.20" else null)
+                put("executablePath", javaBin?.absolutePath)
+            })
+
+            val isVerified = javacExists && javaExists
+            val status = if (isVerified) "installed" else if (javacExists || javaExists || (jdkDir.exists() && jdkDir.isDirectory)) "incomplete" else if (lastErr != null) "failed" else "not_installed"
+            val errMsg = if (isVerified) null else if (!javacExists) "OpenJDK 17 compiler (javac) not installed or executable in Android runtime" else lastErr
+            return ToolchainVerificationEvidence(
+                isVerified = isVerified,
+                status = status,
+                version = if (isVerified) "17.0.20" else null,
+                errorMessage = errMsg,
+                binChecks = binChecks
+            )
+        }
+
+        binaries.forEach { bin ->
+            val binFile = File(binDir, bin)
+            val sysFile = File("/system/bin/$bin")
+            val exists = (binFile.exists() && binFile.canExecute()) || (sysFile.exists() && sysFile.canExecute())
+            if (exists) {
+                anyBinInstalled = true
+                if (detectedVersion == null) {
+                    val probed = runCatching {
+                        val p = ProcessBuilder(listOf(if (binFile.exists()) binFile.absolutePath else sysFile.absolutePath, "--version"))
+                            .redirectErrorStream(true)
+                            .start()
+                        val line = p.inputStream.bufferedReader().readLine()
+                        p.destroy()
+                        line?.trim()?.take(80)
+                    }.getOrNull()
+                    if (!probed.isNullOrBlank()) detectedVersion = probed
+                }
+            } else {
+                allBinsInstalled = false
+            }
+
+            binChecks.put(JSONObject().apply {
+                put("binary", bin)
+                put("command", "$bin --version")
+                put("installed", exists)
+                put("version", if (exists) detectedVersion ?: "Installed" else null)
+                put("executablePath", if (binFile.exists()) binFile.absolutePath else if (sysFile.exists()) sysFile.absolutePath else null)
+            })
+        }
+
+        val isVerified = allBinsInstalled
+        val status = if (isVerified) "installed" else if (anyBinInstalled) "incomplete" else if (lastErr != null) "failed" else "not_installed"
+        return ToolchainVerificationEvidence(
+            isVerified = isVerified,
+            status = status,
+            version = if (isVerified) detectedVersion else null,
+            errorMessage = if (isVerified) null else lastErr,
+            binChecks = binChecks
+        )
+    }
+
     private fun buildToolchainJson(
         id: String,
         name: String,
@@ -173,22 +356,8 @@ class AndroidToolchainManager(private val context: Context) {
         binaries: List<String>,
     ): JSONObject {
         val isCore = category == "core"
-        val isInstalled = prefs.getBoolean("installed_$id", isCore)
-        val version = prefs.getString("version_$id", defaultVersion)
-        val lastErr = prefs.getString("last_error_$id", null)
-
-        val binChecks = JSONArray()
-        binaries.forEach { bin ->
-            val binFile = File(binDir, bin)
-            val exists = binFile.exists() || isCore
-            binChecks.put(JSONObject().apply {
-                put("binary", bin)
-                put("command", "$bin --version")
-                put("installed", exists)
-                put("version", if (exists) version ?: "Installed" else null)
-                put("executablePath", if (binFile.exists()) binFile.absolutePath else "/system/bin/$bin")
-            })
-        }
+        val ev = verifyToolchainEvidence(id, classification, binaries, defaultVersion)
+        val isInstalled = ev.isVerified
 
         return JSONObject().apply {
             put("id", id)
@@ -197,13 +366,13 @@ class AndroidToolchainManager(private val context: Context) {
             put("subtitle", "$name ($classification)")
             put("category", category)
             put("platformClassification", classification)
-            put("status", if (isInstalled) "installed" else if (lastErr != null) "failed" else "not_installed")
+            put("status", ev.status)
             put("installed", isInstalled)
-            put("installedVersion", if (isInstalled) version else null)
-            put("lastError", lastErr)
+            put("installedVersion", ev.version)
+            put("lastError", ev.errorMessage)
             put("canUninstall", !isCore && isInstalled)
             put("canUpdate", isInstalled)
-            put("binaries", binChecks)
+            put("binaries", ev.binChecks)
             put("estimatedDownloadBytes", if (isCore) 0L else 45_000_000L)
             put("estimatedInstalledBytes", if (isCore) 0L else 120_000_000L)
         }
@@ -652,7 +821,7 @@ class AndroidToolchainManager(private val context: Context) {
     }
 
     fun verifyAll(): JSONObject {
-        ensureCoreBridges()
+        reconcileInstalledState()
         return probeToolchains()
     }
 }

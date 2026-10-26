@@ -199,6 +199,7 @@ class MainActivity : ComponentActivity() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     view?.evaluateJavascript(BRIDGE_BOOTSTRAP_JS, null)
+                    handleTabNavigationIntent(intent)
                 }
             }
         }
@@ -222,6 +223,20 @@ class MainActivity : ComponentActivity() {
         )
 
         wv.loadUrl("https://$VIRTUAL_HOST/index.html")
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleTabNavigationIntent(intent)
+    }
+
+    private fun handleTabNavigationIntent(targetIntent: Intent?) {
+        val tab = targetIntent?.getStringExtra("extra_navigate_tab") ?: return
+        webView?.evaluateJavascript(
+            "window.__obsidianNavigateTab && window.__obsidianNavigateTab('$tab');",
+            null
+        )
     }
 
     private fun serveBundledAsset(relativePath: String): WebResourceResponse {
@@ -364,6 +379,13 @@ class MainActivity : ComponentActivity() {
                     });
                 };
 
+                const terminalListeners = [];
+                window.__obsidianReceiveTerminalEvent = function(evt) {
+                    terminalListeners.forEach(fn => {
+                        try { fn(evt); } catch (e) {}
+                    });
+                };
+
                 const OriginalEventSource = window.EventSource;
                 window.EventSource = function(url, config) {
                     if (typeof url === 'string' && url.includes('/api/agent/events')) {
@@ -425,6 +447,50 @@ class MainActivity : ComponentActivity() {
                             close: function() {
                                 const idx = toolchainListeners.indexOf(handler);
                                 if (idx !== -1) toolchainListeners.splice(idx, 1);
+                            }
+                        };
+                    }
+
+                    if (typeof url === 'string' && url.includes('/api/terminal/sessions/') && url.includes('/stream')) {
+                        const parts = url.split('/api/terminal/sessions/')[1].split('/stream');
+                        const sessionId = decodeURIComponent(parts[0]);
+                        const listeners = {};
+                        const handler = function(payload) {
+                            if (!payload || payload.sessionId !== sessionId) return;
+                            const eventName = payload.event || 'output';
+                            const eventData = payload.data || {};
+                            const list = listeners[eventName] || listeners['message'] || [];
+                            const msgEvent = { data: JSON.stringify(eventData) };
+                            list.forEach(cb => { try { cb(msgEvent); } catch (e) {} });
+                        };
+                        terminalListeners.push(handler);
+
+                        if (window.AndroidApiBridge && window.AndroidApiBridge.requestSync) {
+                            setTimeout(() => {
+                                try {
+                                    const rawRes = window.AndroidApiBridge.requestSync('GET', '/api/terminal/sessions/' + encodeURIComponent(sessionId), null);
+                                    const parsed = JSON.parse(rawRes || '{}');
+                                    const body = typeof parsed.body === 'string' ? JSON.parse(parsed.body) : parsed.body;
+                                    if (body && body.session) {
+                                        const initList = listeners['init'] || [];
+                                        initList.forEach(cb => { try { cb({ data: JSON.stringify(body) }); } catch(e) {} });
+                                    }
+                                } catch (e) {}
+                            }, 50);
+                        }
+
+                        return {
+                            addEventListener: function(type, cb) {
+                                if (!listeners[type]) listeners[type] = [];
+                                listeners[type].push(cb);
+                            },
+                            removeEventListener: function(type, cb) {
+                                if (!listeners[type]) return;
+                                listeners[type] = listeners[type].filter(x => x !== cb);
+                            },
+                            close: function() {
+                                const idx = terminalListeners.indexOf(handler);
+                                if (idx !== -1) terminalListeners.splice(idx, 1);
                             }
                         };
                     }

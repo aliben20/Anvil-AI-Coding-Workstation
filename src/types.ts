@@ -521,9 +521,13 @@ export type ToolchainInstallStatus =
   | 'installed'
   | 'not_installed'
   | 'installing'
+  | 'downloading'
+  | 'verifying'
   | 'updating'
   | 'uninstalling'
-  | 'failed';
+  | 'failed'
+  | 'incomplete'
+  | 'unsupported';
 
 export interface ToolchainBinaryCheck {
   binary: string;

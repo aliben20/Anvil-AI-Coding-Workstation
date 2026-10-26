@@ -24,6 +24,7 @@ import {
   Code2,
   Layers,
   Sparkles,
+  Bot,
 } from 'lucide-react';
 import { WorkspaceSummary, FileDiffRecord } from '../types';
 import { formatBytes } from '../design/tokens';
@@ -35,6 +36,8 @@ interface FilesTabProps {
   onNavigateToChat?: (fileContext?: string) => void;
   onNavigateToTerminal?: (initialCommand?: string) => void;
   onNavigateToAgents?: (fileContext?: string) => void;
+  onNavigateToAgentLoop?: (fileContext?: string) => void;
+  onNavigateToDuet?: (fileContext?: string) => void;
 }
 
 interface WorkspaceFileItem {
@@ -50,6 +53,8 @@ export const FilesTab: React.FC<FilesTabProps> = ({
   onNavigateToChat,
   onNavigateToTerminal,
   onNavigateToAgents,
+  onNavigateToAgentLoop,
+  onNavigateToDuet,
 }) => {
   const [files, setFiles] = useState<WorkspaceFileItem[]>([]);
   const [checkpoints, setCheckpoints] = useState<FileDiffRecord[]>([]);
@@ -348,7 +353,33 @@ export const FilesTab: React.FC<FilesTabProps> = ({
             </button>
           )}
 
-          {onNavigateToAgents && (
+          {onNavigateToAgentLoop && (
+            <button
+              type="button"
+              onClick={() => onNavigateToAgentLoop(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
+              className="px-2.5 py-1.5 rounded-lg bg-[#21262D] hover:bg-[#30363D] border border-[#30363D] hover:border-[#C7FF65]/60 text-xs text-[#F0F6FC] hover:text-[#C7FF65] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Open Agent Loop Workstation"
+              aria-label="Open Agent Loop Workstation"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-[#C7FF65]" />
+              <span className="hidden sm:inline">Agent Loop</span>
+            </button>
+          )}
+
+          {onNavigateToDuet && (
+            <button
+              type="button"
+              onClick={() => onNavigateToDuet(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
+              className="px-2.5 py-1.5 rounded-lg bg-[#21262D] hover:bg-[#30363D] border border-[#30363D] hover:border-[#A371F7]/60 text-xs text-[#F0F6FC] hover:text-[#D2A8FF] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Open Duet Multi-Agent Collaboration"
+              aria-label="Open Duet Multi-Agent Collaboration"
+            >
+              <Bot className="w-3.5 h-3.5 text-[#A371F7]" />
+              <span className="hidden sm:inline">Duet Agent</span>
+            </button>
+          )}
+
+          {!onNavigateToAgentLoop && onNavigateToAgents && (
             <button
               type="button"
               onClick={() => onNavigateToAgents(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
@@ -418,7 +449,29 @@ export const FilesTab: React.FC<FilesTabProps> = ({
         >
           Editor {isDirty && '•'}
         </button>
-        {onNavigateToAgents && (
+        {onNavigateToAgentLoop && (
+          <button
+            type="button"
+            onClick={() => onNavigateToAgentLoop(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
+            className="px-2 py-1.5 text-xs font-semibold rounded-md text-[#C7FF65] bg-[#21262D]/60 hover:bg-[#21262D] border border-[#C7FF65]/30 flex items-center gap-1 shrink-0"
+            title="Open in Agent Loop"
+          >
+            <Sparkles className="w-3 h-3 text-[#C7FF65]" />
+            <span>Agent Loop</span>
+          </button>
+        )}
+        {onNavigateToDuet && (
+          <button
+            type="button"
+            onClick={() => onNavigateToDuet(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
+            className="px-2 py-1.5 text-xs font-semibold rounded-md text-[#D2A8FF] bg-[#21262D]/60 hover:bg-[#21262D] border border-[#A371F7]/30 flex items-center gap-1 shrink-0"
+            title="Open in Duet Agent"
+          >
+            <Bot className="w-3 h-3 text-[#A371F7]" />
+            <span>Duet Agent</span>
+          </button>
+        )}
+        {!onNavigateToAgentLoop && onNavigateToAgents && (
           <button
             type="button"
             onClick={() => onNavigateToAgents(selectedPath ? `Inspect file: ${selectedPath}` : undefined)}
@@ -564,7 +617,45 @@ export const FilesTab: React.FC<FilesTabProps> = ({
                     <span>{saving ? 'Saving...' : 'Save'}</span>
                   </button>
 
-                  {onNavigateToAgents && (
+                  {onNavigateToAgentLoop && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onNavigateToAgentLoop(
+                          `Autonomous Agent Loop Task for file \`${selectedPath}\` in workspace \`${activeWorkspaceId}\`:\n\n\`\`\`\n${editorContent.slice(
+                            0,
+                            3000
+                          )}\n\`\`\`\nPlease inspect this file, identify any issues or opportunities for improvement, and generate concrete changes.`
+                        )
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-[#C7FF65]/10 hover:bg-[#C7FF65]/20 border border-[#C7FF65]/40 text-xs text-[#C7FF65] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Run file in Autonomous Agent Loop"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-[#C7FF65]" />
+                      <span className="hidden sm:inline">Agent Loop</span>
+                    </button>
+                  )}
+
+                  {onNavigateToDuet && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onNavigateToDuet(
+                          `Duet Multi-Agent Peer Review for file \`${selectedPath}\` in workspace \`${activeWorkspaceId}\`:\n\n\`\`\`\n${editorContent.slice(
+                            0,
+                            3000
+                          )}\n\`\`\`\nPrimary Agent: analyze syntax, architecture, and logic.\nCollaborator Agent: review security, edge-cases, and test coverage.`
+                        )
+                      }
+                      className="px-2.5 py-1.5 rounded-lg bg-[#A371F7]/10 hover:bg-[#A371F7]/20 border border-[#A371F7]/40 text-xs text-[#D2A8FF] font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      title="Run Duet Multi-Agent Peer Review"
+                    >
+                      <Bot className="w-3.5 h-3.5 text-[#A371F7]" />
+                      <span className="hidden sm:inline">Duet Review</span>
+                    </button>
+                  )}
+
+                  {!onNavigateToAgentLoop && onNavigateToAgents && (
                     <button
                       type="button"
                       onClick={() =>

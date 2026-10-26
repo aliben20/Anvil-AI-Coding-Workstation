@@ -828,6 +828,10 @@ export const MobileHarnessToolchainSection: React.FC<MobileHarnessToolchainSecti
                                 className={`text-[11px] font-mono font-semibold ${
                                   isInstalled
                                     ? 'text-[#69D69E]'
+                                    : item.status === 'incomplete'
+                                    ? 'text-[#F4C46A]'
+                                    : item.status === 'unsupported'
+                                    ? 'text-[#D8B9FF]'
                                     : isBusy
                                     ? 'text-[#F28C52]'
                                     : isFailed
@@ -836,7 +840,11 @@ export const MobileHarnessToolchainSection: React.FC<MobileHarnessToolchainSecti
                                 }`}
                               >
                                 {isInstalled
-                                  ? 'Installed'
+                                  ? 'Installed & Verified'
+                                  : item.status === 'incomplete'
+                                  ? 'Installation Incomplete'
+                                  : item.status === 'unsupported'
+                                  ? 'Unsupported on Device'
                                   : item.status === 'installing'
                                   ? 'Installing...'
                                   : item.status === 'updating'
@@ -844,7 +852,7 @@ export const MobileHarnessToolchainSection: React.FC<MobileHarnessToolchainSecti
                                   : item.status === 'uninstalling'
                                   ? 'Uninstalling...'
                                   : isFailed
-                                  ? 'Failed'
+                                  ? 'Verification Failed'
                                   : isSelected
                                   ? 'Selected (Not Installed)'
                                   : 'Not Installed'}

@@ -13,6 +13,12 @@ import io.anvil.workstation.chat.ChatProviderConfig
 import io.anvil.workstation.chat.ChatTurn
 import io.anvil.workstation.localai.GgufHeaderInspector
 import io.anvil.workstation.security.AndroidKeystoreAuthManager
+import io.anvil.workstation.terminal.PersistentProcessTerminalSession
+import io.anvil.workstation.terminal.AndroidShellRuntimeMode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -62,6 +68,9 @@ class AndroidWebBridge(
     private val conversations = ConcurrentHashMap<String, StoredConversation>()
     private val messagesByConv = ConcurrentHashMap<String, MutableList<StoredMessage>>()
     private val agentEvents = CopyOnWriteArrayList<JSONObject>()
+
+    private val terminalScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val terminalSessions = ConcurrentHashMap<String, PersistentProcessTerminalSession>()
 
     @Volatile
     private var cachedLiveServerUrl: String? = null
@@ -237,6 +246,68 @@ class AndroidWebBridge(
             arr.put(convToJson(c))
         }
         return arr
+    }
+
+    private fun terminalSessionToJson(session: PersistentProcessTerminalSession): JSONObject {
+        return JSONObject().apply {
+            put("sessionId", session.sessionId)
+            put("title", "Android Shell (${session.runtimeMode.name})")
+            put("workspaceId", viewModel.activeWorkspace?.id ?: "android-workstation")
+            put("workspaceRoot", session.currentDirectory.absolutePath)
+            put("cwd", session.currentDirectory.absolutePath)
+            put("shell", if (session.runtimeMode == AndroidShellRuntimeMode.PROOT_LINUX) "/bin/bash" else "/system/bin/sh")
+            put("shellPid", null)
+            put("bridgePid", null)
+            put("ttyPath", null)
+            put("transportMode", "pipe")
+            put("status", if (session.isRunning) "running" else "exited")
+            put("exitCode", session.exitCode)
+            put("exitSignal", null)
+            put("cols", 100)
+            put("rows", 30)
+            put("createdAtMillis", System.currentTimeMillis())
+            put("lastActivityMillis", System.currentTimeMillis())
+            synchronized(session.scrollback) {
+                put("scrollback", session.scrollback.toString())
+            }
+        }
+    }
+
+    private fun createAndStartTerminalSession(wsId: String?): PersistentProcessTerminalSession {
+        val baseDir = File(context.filesDir, "workspaces/${wsId ?: "android-workstation"}").apply {
+            if (!exists()) mkdirs()
+        }
+        val prootBin = File(toolchainManager.binDir, "proot")
+        val rootfs = File(toolchainManager.toolchainsDir, "rootfs")
+        val session = PersistentProcessTerminalSession(
+            initialDir = baseDir,
+            prootBinary = if (prootBin.exists()) prootBin else null,
+            prootRootfsDir = if (rootfs.exists()) rootfs else null,
+            scope = terminalScope
+        )
+        terminalSessions[session.sessionId] = session
+        session.startSession()
+
+        terminalScope.launch {
+            session.outputStream.collect { chunk ->
+                mainHandler.post {
+                    val payload = JSONObject().apply {
+                        put("sessionId", session.sessionId)
+                        put("event", "output")
+                        put("data", JSONObject().apply {
+                            put("data", chunk)
+                            put("cwd", session.currentDirectory.absolutePath)
+                            put("timestampMillis", System.currentTimeMillis())
+                        })
+                    }.toString().replace("\\", "\\\\").replace("'", "\\'")
+                    webViewProvider()?.evaluateJavascript(
+                        "window.__obsidianReceiveTerminalEvent && window.__obsidianReceiveTerminalEvent(JSON.parse('$payload'));",
+                        null
+                    )
+                }
+            }
+        }
+        return session
     }
 
     private fun handleLocalApi(method: String, rawPath: String, bodyStr: String?): String {
@@ -961,6 +1032,73 @@ class AndroidWebBridge(
                     put(JSONObject().put("id", "debugger").put("name", "Build & Crash Debugger").put("role", "Debugger"))
                 }
                 JSONObject().put("agents", agents).toString()
+            }
+
+            pathOnly == "/api/terminal/sessions" && method == "GET" -> {
+                val sessionsArr = JSONArray()
+                terminalSessions.values.forEach { sess ->
+                    sessionsArr.put(terminalSessionToJson(sess))
+                }
+                JSONObject().apply {
+                    put("terminalToken", "android-native-terminal-token")
+                    put("sessions", sessionsArr)
+                }.toString()
+            }
+
+            pathOnly == "/api/terminal/sessions" && method == "POST" -> {
+                val wsId = body?.optString("workspaceId") ?: viewModel.activeWorkspace?.id
+                val session = createAndStartTerminalSession(wsId)
+                JSONObject().apply {
+                    put("terminalToken", "android-native-terminal-token")
+                    put("session", terminalSessionToJson(session))
+                }.toString()
+            }
+
+            pathOnly.startsWith("/api/terminal/sessions/") && pathOnly.endsWith("/input") && method == "POST" -> {
+                val parts = pathOnly.removePrefix("/api/terminal/sessions/").split("/")
+                val sid = parts[0]
+                val data = body?.optString("data") ?: ""
+                val sess = terminalSessions[sid] ?: throw IllegalArgumentException("Terminal session not found: $sid")
+                runBlocking { sess.writeInput(data) }
+                JSONObject().apply {
+                    put("ok", true)
+                    put("session", terminalSessionToJson(sess))
+                }.toString()
+            }
+
+            pathOnly.startsWith("/api/terminal/sessions/") && pathOnly.endsWith("/resize") && method == "POST" -> {
+                JSONObject().put("ok", true).toString()
+            }
+
+            pathOnly.startsWith("/api/terminal/sessions/") && pathOnly.endsWith("/interrupt") && method == "POST" -> {
+                val parts = pathOnly.removePrefix("/api/terminal/sessions/").split("/")
+                val sid = parts[0]
+                val sess = terminalSessions[sid] ?: throw IllegalArgumentException("Terminal session not found: $sid")
+                runBlocking { sess.sendInterrupt() }
+                JSONObject().put("ok", true).toString()
+            }
+
+            pathOnly.startsWith("/api/terminal/sessions/") && pathOnly.endsWith("/clear") && method == "POST" -> {
+                val parts = pathOnly.removePrefix("/api/terminal/sessions/").split("/")
+                val sid = parts[0]
+                val sess = terminalSessions[sid] ?: throw IllegalArgumentException("Terminal session not found: $sid")
+                sess.clearScrollbackOnly()
+                JSONObject().put("ok", true).toString()
+            }
+
+            pathOnly.startsWith("/api/terminal/sessions/") && !pathOnly.endsWith("/stream") && method == "GET" -> {
+                val sid = pathOnly.removePrefix("/api/terminal/sessions/").substringBefore("/")
+                val sess = terminalSessions[sid] ?: throw IllegalArgumentException("Terminal session not found: $sid")
+                JSONObject().apply {
+                    put("session", terminalSessionToJson(sess))
+                }.toString()
+            }
+
+            pathOnly.startsWith("/api/terminal/sessions/") && method == "DELETE" -> {
+                val sid = pathOnly.removePrefix("/api/terminal/sessions/").substringBefore("/")
+                val sess = terminalSessions.remove(sid)
+                sess?.closeSession()
+                JSONObject().put("ok", true).toString()
             }
 
             else -> JSONObject().put("ok", true).toString()

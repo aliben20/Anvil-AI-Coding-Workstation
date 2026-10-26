@@ -20,6 +20,14 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import android.widget.ProgressBar
+import android.widget.Button
+import android.graphics.Typeface
+import android.text.TextUtils
+import android.os.Handler
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import io.anvil.workstation.MainActivity
 import io.anvil.workstation.R
@@ -48,6 +56,14 @@ class FloatingBubbleService : Service() {
     private var lastStep: String = "Ready for tasks"
     private var lastIsRunning: Boolean = false
     private var lastProgress: Int = -1
+
+    private var expandedHudView: View? = null
+    private var hudTitleView: TextView? = null
+    private var hudStepView: TextView? = null
+    private var hudStatusBadge: TextView? = null
+    private var hudProgressBar: ProgressBar? = null
+    private var hudProgressText: TextView? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     companion object {
         const val ACTION_SHOW = "io.anvil.workstation.ACTION_SHOW_BUBBLE"
@@ -345,6 +361,7 @@ class FloatingBubbleService : Service() {
 
                 when (event.action) {
                     MotionEvent.ACTION_DOWN -> {
+                        collapseExpandedHud()
                         initialX = currentParams.x
                         initialY = currentParams.y
                         initialTouchX = event.rawX
@@ -474,12 +491,7 @@ class FloatingBubbleService : Service() {
                         } else {
                             container.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(100).start()
                             if (!hasMoved) {
-                                val launchIntent = Intent(this@FloatingBubbleService, MainActivity::class.java).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                                        Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                                        Intent.FLAG_ACTIVITY_CLEAR_TOP
-                                }
-                                startActivity(launchIntent)
+                                toggleExpandedHud(currentParams.x, currentParams.y)
                             } else {
                                 val snapMargin = (16 * v.resources.displayMetrics.density).toInt()
                                 val midScreen = currentScreenWidth / 2
@@ -609,9 +621,299 @@ class FloatingBubbleService : Service() {
                     .start()
             }
         }
+
+        // 3. Update active expanded HUD overlay card if visible
+        mainHandler.post {
+            hudTitleView?.text = title
+            hudStepView?.text = step
+            hudStatusBadge?.apply {
+                text = if (isRunning) "RUNNING" else "IDLE"
+                setTextColor(Color.parseColor(if (isRunning) "#C7FF65" else "#8B949E"))
+                (background as? GradientDrawable)?.apply {
+                    setColor(Color.parseColor(if (isRunning) "#26C7FF65" else "#21262D"))
+                    setStroke((1 * resources.displayMetrics.density).toInt(), Color.parseColor(if (isRunning) "#66C7FF65" else "#30363D"))
+                }
+            }
+            if (progress in 0..100) {
+                (hudProgressBar?.parent as? View)?.visibility = View.VISIBLE
+                hudProgressBar?.progress = progress
+                hudProgressText?.text = "$progress%"
+            } else {
+                (hudProgressBar?.parent as? View)?.visibility = View.GONE
+            }
+        }
+    }
+
+    private fun toggleExpandedHud(bubbleX: Int, bubbleY: Int) {
+        val wm = windowManager ?: return
+        if (expandedHudView != null) {
+            collapseExpandedHud()
+            return
+        }
+
+        val metrics = resources.displayMetrics
+        val density = metrics.density
+        val screenWidth = metrics.widthPixels
+        val screenHeight = metrics.heightPixels
+
+        val hudWidth = (280 * density).toInt().coerceAtMost((screenWidth * 0.88f).toInt())
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        val hParams = WindowManager.LayoutParams(
+            hudWidth,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            layoutType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            val margin = (12 * density).toInt()
+            val targetX = if (bubbleX > screenWidth / 2) {
+                (bubbleX - hudWidth - margin).coerceAtLeast(margin)
+            } else {
+                (bubbleX + bubbleSizePx + margin).coerceAtMost(screenWidth - hudWidth - margin)
+            }
+            x = targetX
+            y = bubbleY.coerceIn(margin, (screenHeight - (280 * density).toInt()).coerceAtLeast(margin))
+        }
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = (14 * density).toInt()
+            setPadding(pad, pad, pad, pad)
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = 16 * density
+                setColor(Color.parseColor("#F0161B22"))
+                setStroke((1.5f * density).toInt(), Color.parseColor("#30363D"))
+            }
+            background = bg
+            elevation = 24f
+        }
+
+        // Header
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val titleText = TextView(this).apply {
+            text = "OBSIDIAN Live Activity"
+            setTextColor(Color.parseColor("#F0F6FC"))
+            textSize = 13f
+            typeface = Typeface.DEFAULT_BOLD
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        val badge = TextView(this).apply {
+            text = if (lastIsRunning) "RUNNING" else "IDLE"
+            setTextColor(Color.parseColor(if (lastIsRunning) "#C7FF65" else "#8B949E"))
+            textSize = 10f
+            typeface = Typeface.MONOSPACE
+            val bPadH = (6 * density).toInt()
+            val bPadV = (2 * density).toInt()
+            setPadding(bPadH, bPadV, bPadH, bPadV)
+            val bBg = GradientDrawable().apply {
+                cornerRadius = 6 * density
+                setColor(Color.parseColor(if (lastIsRunning) "#26C7FF65" else "#21262D"))
+                setStroke((1 * density).toInt(), Color.parseColor(if (lastIsRunning) "#66C7FF65" else "#30363D"))
+            }
+            background = bBg
+        }
+        hudStatusBadge = badge
+        val closeBtn = ImageView(this).apply {
+            val icPad = (4 * density).toInt()
+            setPadding(icPad, icPad, icPad, icPad)
+            val closeBg = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#21262D"))
+            }
+            background = closeBg
+            layoutParams = LinearLayout.LayoutParams((24 * density).toInt(), (24 * density).toInt()).apply {
+                marginStart = (8 * density).toInt()
+            }
+            setColorFilter(Color.parseColor("#8B949E"))
+            setImageResource(android.R.drawable.ic_menu_close_clear_cancel)
+            setOnClickListener { collapseExpandedHud() }
+        }
+        header.addView(titleText)
+        header.addView(badge)
+        header.addView(closeBtn)
+        root.addView(header)
+
+        // Divider
+        val div = View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (1 * density).toInt()).apply {
+                topMargin = (10 * density).toInt()
+                bottomMargin = (10 * density).toInt()
+            }
+            setBackgroundColor(Color.parseColor("#30363D"))
+        }
+        root.addView(div)
+
+        // Live task card
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val cPad = (10 * density).toInt()
+            setPadding(cPad, cPad, cPad, cPad)
+            val cBg = GradientDrawable().apply {
+                cornerRadius = 10 * density
+                setColor(Color.parseColor("#0D1117"))
+                setStroke((1 * density).toInt(), Color.parseColor("#21262D"))
+            }
+            background = cBg
+        }
+        val actTitle = TextView(this).apply {
+            text = lastTitle
+            setTextColor(Color.parseColor("#C7FF65"))
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            maxLines = 1
+            ellipsize = TextUtils.TruncateAt.END
+        }
+        hudTitleView = actTitle
+        val actStep = TextView(this).apply {
+            text = lastStep
+            setTextColor(Color.parseColor("#8B949E"))
+            textSize = 11f
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.END
+            val topM = (4 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = topM
+            }
+        }
+        hudStepView = actStep
+        card.addView(actTitle)
+        card.addView(actStep)
+
+        val progressRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            val pTop = (8 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = pTop
+            }
+            visibility = if (lastProgress in 0..100) View.VISIBLE else View.GONE
+        }
+        val pBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = if (lastProgress in 0..100) lastProgress else 0
+            layoutParams = LinearLayout.LayoutParams(0, (6 * density).toInt(), 1f)
+            val pBg = GradientDrawable().apply {
+                cornerRadius = 3 * density
+                setColor(Color.parseColor("#21262D"))
+            }
+            progressDrawable = GradientDrawable().apply {
+                cornerRadius = 3 * density
+                setColor(Color.parseColor("#C7FF65"))
+            }
+        }
+        hudProgressBar = pBar
+        val pText = TextView(this).apply {
+            text = if (lastProgress in 0..100) "$lastProgress%" else ""
+            setTextColor(Color.parseColor("#C7FF65"))
+            textSize = 10f
+            typeface = Typeface.MONOSPACE
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                marginStart = (6 * density).toInt()
+            }
+        }
+        hudProgressText = pText
+        progressRow.addView(pBar)
+        progressRow.addView(pText)
+        card.addView(progressRow)
+
+        root.addView(card)
+
+        // Actions Row
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            val aTop = (12 * density).toInt()
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                topMargin = aTop
+            }
+        }
+
+        fun createButton(label: String, targetTab: String?, isPrimary: Boolean): Button {
+            return Button(this).apply {
+                text = label
+                textSize = 11f
+                isAllCaps = false
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(Color.parseColor(if (isPrimary) "#0D1117" else "#F0F6FC"))
+                val btnBg = GradientDrawable().apply {
+                    cornerRadius = 8 * density
+                    setColor(Color.parseColor(if (isPrimary) "#C7FF65" else "#21262D"))
+                    if (!isPrimary) setStroke((1 * density).toInt(), Color.parseColor("#30363D"))
+                }
+                background = btnBg
+                val vPad = (4 * density).toInt()
+                setPadding(0, vPad, 0, vPad)
+                layoutParams = LinearLayout.LayoutParams(0, (34 * density).toInt(), 1f).apply {
+                    val m = (3 * density).toInt()
+                    setMargins(m, 0, m, 0)
+                }
+                setOnClickListener {
+                    collapseExpandedHud()
+                    val launchIntent = Intent(this@FloatingBubbleService, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        if (targetTab != null) {
+                            putExtra("extra_navigate_tab", targetTab)
+                        }
+                    }
+                    startActivity(launchIntent)
+                }
+            }
+        }
+
+        actions.addView(createButton("Chat", "chat", false))
+        actions.addView(createButton("Terminal", "terminal", false))
+        actions.addView(createButton("Open App", null, true))
+        root.addView(actions)
+
+        root.scaleX = 0.85f
+        root.scaleY = 0.85f
+        root.alpha = 0f
+        root.animate()
+            .scaleX(1f)
+            .scaleY(1f)
+            .alpha(1f)
+            .setDuration(160)
+            .start()
+
+        wm.addView(root, hParams)
+        expandedHudView = root
+    }
+
+    private fun collapseExpandedHud() {
+        val view = expandedHudView ?: return
+        expandedHudView = null
+        hudTitleView = null
+        hudStepView = null
+        hudStatusBadge = null
+        hudProgressBar = null
+        hudProgressText = null
+        view.animate()
+            .scaleX(0.85f)
+            .scaleY(0.85f)
+            .alpha(0f)
+            .setDuration(120)
+            .withEndAction {
+                try {
+                    windowManager?.removeView(view)
+                } catch (_: Exception) {}
+            }
+            .start()
     }
 
     private fun removeBubble() {
+        collapseExpandedHud()
         dismissView?.let { dv ->
             try {
                 windowManager?.removeView(dv)

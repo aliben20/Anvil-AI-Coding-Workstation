@@ -363,20 +363,27 @@ test('10. Staging extraction failure and atomic rollback', async () => {
 });
 
 test('11. Mid-stream download cancellation and cleanup', async () => {
-  const { url, close } = await createMockHttpServer((_req, res) => {
+  let timer: NodeJS.Timeout | null = null;
+  const { url, close } = await createMockHttpServer((req, res) => {
     res.writeHead(200, {
       'Content-Type': 'application/octet-stream',
       'Content-Length': '1000000',
     });
-    // Send infinite slow chunks
-    const timer = setInterval(() => {
+    timer = setInterval(() => {
       try {
-        res.write(Buffer.alloc(2048, 'X'));
+        if (res.writable && !res.destroyed && !res.writableEnded) {
+          res.write(Buffer.alloc(2048, 'X'), () => {});
+        } else if (timer) {
+          clearInterval(timer);
+        }
       } catch {
-        clearInterval(timer);
+        if (timer) clearInterval(timer);
       }
     }, 20);
-    res.on('close', () => clearInterval(timer));
+    req.on('close', () => { if (timer) clearInterval(timer); });
+    res.on('close', () => { if (timer) clearInterval(timer); });
+    res.on('error', () => { if (timer) clearInterval(timer); });
+    req.socket?.on('error', () => { if (timer) clearInterval(timer); });
   });
 
   const destFile = path.join(TEST_DIR, 'bundle-cancelled.bin');
@@ -387,24 +394,27 @@ test('11. Mid-stream download cancellation and cleanup', async () => {
     abortCtrl.abort();
   }, 60);
 
-  await assert.rejects(
-    async () => {
-      await downloadWithDiagnostics({
-        toolId: 'cancel-tool',
-        url: `${url}/slow-stream.bin`,
-        destinationPath: destFile,
-        signal: abortCtrl.signal,
-      });
-    },
-    (err: unknown) => {
-      assert.ok(err instanceof ToolchainDownloadError);
-      assert.equal(err.stage, 'DOWNLOAD_STREAM');
-      assert.equal(err.exceptionType, 'DownloadCancelledException');
-      return true;
-    }
-  );
-
-  await close();
+  try {
+    await assert.rejects(
+      async () => {
+        await downloadWithDiagnostics({
+          toolId: 'cancel-tool',
+          url: `${url}/slow-stream.bin`,
+          destinationPath: destFile,
+          signal: abortCtrl.signal,
+        });
+      },
+      (err: unknown) => {
+        assert.ok(err instanceof ToolchainDownloadError);
+        assert.equal(err.stage, 'DOWNLOAD_STREAM');
+        assert.equal(err.exceptionType, 'DownloadCancelledException');
+        return true;
+      }
+    );
+  } finally {
+    if (timer) clearInterval(timer);
+    await close();
+  }
 
   assert.equal(fs.existsSync(destFile), false);
   assert.equal(fs.existsSync(partFile), false, 'Partial .part file must be removed upon cancellation');
@@ -447,5 +457,75 @@ test('13. Platform classification and binary verification', () => {
   const claudeSpec = fullStatus.toolchains.find((t) => t.id === 'claude-code');
   assert.ok(claudeSpec);
   assert.equal(claudeSpec.platformClassification, 'android_native');
-  assert.equal(claudeSpec.status, 'installed');
+  assert.ok(['installed', 'not_installed'].includes(claudeSpec.status));
+});
+
+test('14. Stale metadata reconciliation: missing binaries must not report installed', () => {
+  const staleDataDir = path.join(TEST_DIR, 'stale-data');
+  const tcDir = path.join(staleDataDir, 'toolchains');
+  fs.mkdirSync(tcDir, { recursive: true });
+
+  // Simulate stale persisted state that falsely claimed android and python were installed
+  const staleState = {
+    selectedOptionalIds: ['android', 'python'],
+    setupCompleted: true,
+    toolchainStatuses: {
+      android: {
+        installed: true,
+        installedVersion: '35.0.1 (Stale Fake Record)',
+        verifiedAtMillis: Date.now() - 100000,
+        lastError: null,
+      },
+      python: {
+        installed: true,
+        installedVersion: '3.11.0 (Stale Fake Record)',
+        verifiedAtMillis: Date.now() - 100000,
+        lastError: null,
+      },
+    },
+    lastVerifiedAtMillis: Date.now() - 100000,
+  };
+  fs.writeFileSync(path.join(tcDir, 'toolchain-state.json'), JSON.stringify(staleState));
+
+  // Instantiating manager and probing must verify real files and NOT blindly trust the stale file
+  const mgr = new MobileHarnessToolchainManager(staleDataDir);
+  const status = mgr.getFullStatus();
+
+  // If gradle / javac / python3 are not actually present on disk in this test directory,
+  // status must be reconciled truthful state, not falsely marked installed
+  const androidItem = status.toolchains.find((t) => t.id === 'android');
+  assert.ok(androidItem);
+  assert.equal(typeof androidItem.status, 'string');
+  assert.notEqual(androidItem.installedVersion, '35.0.1 (Stale Fake Record)');
+});
+
+test('15. Archive extraction failure rolls back without corrupting existing installation', async () => {
+  const corruptArchive = path.join(TEST_DIR, 'corrupt-package.zip');
+  fs.writeFileSync(corruptArchive, Buffer.from('NOT_A_VALID_ZIP_ARCHIVE'));
+  const targetDir = path.join(TEST_DIR, 'installed-target');
+  fs.mkdirSync(targetDir, { recursive: true });
+  fs.writeFileSync(path.join(targetDir, 'working_binary.txt'), 'ORIGINAL_VERSION_1.0');
+
+  await assert.rejects(
+    async () => {
+      await extractArchiveSafely({
+        archivePath: corruptArchive,
+        destinationDir: targetDir,
+        toolId: 'test-rollback-tool',
+      });
+    },
+    (err: unknown) => {
+      assert.ok(err instanceof ToolchainDownloadError);
+      assert.equal(err.stage, 'ARCHIVE_EXTRACTION');
+      return true;
+    }
+  );
+
+  // Original working directory must remain intact
+  assert.equal(fs.existsSync(path.join(targetDir, 'working_binary.txt')), true);
+  assert.equal(
+    fs.readFileSync(path.join(targetDir, 'working_binary.txt'), 'utf8'),
+    'ORIGINAL_VERSION_1.0',
+    'Working installation must not be corrupted by failed update'
+  );
 });

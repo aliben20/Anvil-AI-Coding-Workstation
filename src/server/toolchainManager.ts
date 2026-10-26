@@ -1280,41 +1280,7 @@ export class MobileHarnessToolchainManager {
    * genuinely executable in every shell session.
    */
   private ensureCoreClaudeBridge(): void {
-    const localClaudePath = path.join(this.toolchainsBinDir, 'claude');
-    const scriptContent = [
-      '#!/usr/bin/env node',
-      'const args = process.argv.slice(2);',
-      'if (args.includes("--version") || args.includes("-v")) {',
-      '  console.log("2.1.263 (Claude Code · Mobile Harness Core Runtime)");',
-      '  process.exit(0);',
-      '}',
-      'if (args.includes("--help") || args.includes("-h") || args.length === 0) {',
-      '  console.log("Claude Code CLI v2.1.263 (OBSIDIAN Mobile Harness Runtime Bridge)");',
-      '  console.log("Usage: claude [options] [prompt]");',
-      '  console.log("  --version, -v    Output verified Claude Code runtime version");',
-      '  console.log("  --print, -p      Print response and exit");',
-      '  process.exit(0);',
-      '}',
-      'console.log("Claude Code Runtime Bridge active in workspace: " + process.cwd());',
-    ].join('\n');
-
-    try {
-      if (!fs.existsSync(localClaudePath)) {
-        fs.writeFileSync(localClaudePath, scriptContent, { mode: 0o755 });
-      }
-      if (process.platform === 'win32') {
-        const localCmd = localClaudePath + '.cmd';
-        if (!fs.existsSync(localCmd)) {
-          fs.writeFileSync(localCmd, `@node "%~dp0\\claude" %*\r\n`);
-        }
-      }
-      const globalClaude = '/usr/local/bin/claude';
-      if (!fs.existsSync(globalClaude)) {
-        fs.writeFileSync(globalClaude, scriptContent, { mode: 0o755 });
-      }
-    } catch {
-      // Non-root fallback uses toolchainsBinDir on PATH
-    }
+    // Real toolchain verification: do not generate fake mock version stubs
   }
 
   private loadState(): PersistedToolchainState {
