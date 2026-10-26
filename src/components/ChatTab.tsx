@@ -46,6 +46,8 @@ import {
   ArrowRight,
   ExternalLink,
   Sparkles,
+  Smartphone,
+  Bot,
 } from 'lucide-react';
 import {
   Conversation,
@@ -57,6 +59,8 @@ import {
   LocalAiModel,
   SubAgentTask,
   SkillDefinition,
+  AgentToolIntegration,
+  AgentIntegrationId,
 } from '../types';
 import { ChatMarkdown } from './ChatMarkdown';
 import { formatBytes } from '../design/tokens';
@@ -193,6 +197,7 @@ interface ChatTabProps {
   onNavigateToPreview?: () => void;
   onNavigateToAgents?: () => void;
   onNavigateToSkills?: () => void;
+  onNavigateToTools?: (subView?: 'tools' | 'integrations' | 'bundles' | 'mcp') => void;
   subagentTasks?: SubAgentTask[];
   onRefreshTasks?: () => void;
 }
@@ -285,6 +290,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   onNavigateToPreview,
   onNavigateToAgents,
   onNavigateToSkills,
+  onNavigateToTools,
   subagentTasks,
   onRefreshTasks,
 }) => {
@@ -404,7 +410,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
   const [freeHostRamBytes, setFreeHostRamBytes] = useState<number>(0);
   const [loadingLocalModels, setLoadingLocalModels] = useState(false);
   const [installingModelId, setInstallingModelId] = useState<string | null>(null);
-  const [modelSelectorTab, setModelSelectorTab] = useState<'antigravity' | 'local' | 'cloud'>('antigravity');
+  const [modelSelectorTab, setModelSelectorTab] = useState<'agents' | 'antigravity' | 'local' | 'cloud'>('agents');
+  const [agentIntegrations, setAgentIntegrations] = useState<AgentToolIntegration[]>([]);
+  const [loadingIntegrations, setLoadingIntegrations] = useState(false);
   const [showImportForm, setShowImportForm] = useState(false);
   const [importFilePath, setImportFilePath] = useState('');
   const [importCustomName, setImportCustomName] = useState('');
@@ -617,6 +625,9 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
   const isCurrentLocal = activeConv?.providerId === 'local-ai';
   const isCurrentAntigravity = activeConv?.providerId === 'antigravity';
+  const isCurrentClaudeCode = activeConv?.providerId === 'claude-code';
+  const isCurrentOpenCode = activeConv?.providerId === 'opencode';
+  const isCurrentMobileHarness = activeConv?.providerId === 'mobile-harness';
   const activeProvider =
     providers.find((p) => p.id === (activeConv?.providerId || 'antigravity')) ||
     providers.find((p) => p.id === 'antigravity') ||
@@ -725,9 +736,29 @@ export const ChatTab: React.FC<ChatTabProps> = ({
     }
   };
 
+  const fetchAgentIntegrations = async () => {
+    setLoadingIntegrations(true);
+    try {
+      const res = await fetch('/api/integrations');
+      const data = await res.json();
+      if (Array.isArray(data.integrations)) setAgentIntegrations(data.integrations);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingIntegrations(false);
+    }
+  };
+
   useEffect(() => {
     fetchLocalModels();
+    fetchAgentIntegrations();
   }, []);
+
+  useEffect(() => {
+    if (showModelDropdown) {
+      fetchAgentIntegrations();
+    }
+  }, [showModelDropdown]);
 
   const handleInstallLocalModel = async (modelId: string) => {
     setInstallingModelId(modelId);
@@ -1174,6 +1205,12 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                     <HardDrive className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
                   ) : isCurrentAntigravity ? (
                     <Sparkles className="w-3.5 h-3.5 text-[#58A6FF] shrink-0" />
+                  ) : isCurrentClaudeCode ? (
+                    <Bot className="w-3.5 h-3.5 text-[#F59E0B] shrink-0" />
+                  ) : isCurrentOpenCode ? (
+                    <Code2 className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
+                  ) : isCurrentMobileHarness ? (
+                    <Smartphone className="w-3.5 h-3.5 text-[#34A853] shrink-0" />
                   ) : (
                     <Cpu className="w-3.5 h-3.5 text-[#C7FF65] shrink-0" />
                   )}
@@ -1185,6 +1222,18 @@ export const ChatTab: React.FC<ChatTabProps> = ({
                   ) : isCurrentAntigravity ? (
                     <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] bg-[#58A6FF]/20 text-[#58A6FF] font-semibold">
                       Antigravity
+                    </span>
+                  ) : isCurrentClaudeCode ? (
+                    <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] bg-[#F59E0B]/20 text-[#F59E0B] font-semibold">
+                      Claude Code
+                    </span>
+                  ) : isCurrentOpenCode ? (
+                    <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] bg-[#C7FF65]/20 text-[#C7FF65] font-semibold">
+                      OpenCode
+                    </span>
+                  ) : isCurrentMobileHarness ? (
+                    <span className="hidden sm:inline-block px-1.5 py-0.2 rounded text-[10px] bg-[#34A853]/20 text-[#34A853] font-semibold">
+                      Mobile Harness
                     </span>
                   ) : null}
                   <ChevronDown className="w-3 h-3 text-[#8B949E] shrink-0" />
@@ -1363,19 +1412,41 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             </div>
           )}
 
-          {/* Segmented Top Tabs: Antigravity vs Local AI vs Cloud */}
-          <div className="px-4 pt-3 pb-2 border-b border-[#30363D]/60 shrink-0 flex items-center gap-2">
+          {/* Segmented Top Tabs: Coding Agents vs Antigravity vs Local AI vs Cloud */}
+          <div className="px-4 pt-3 pb-2 border-b border-[#30363D]/60 shrink-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setModelSelectorTab('agents')}
+              className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 ${
+                modelSelectorTab === 'agents'
+                  ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm font-bold'
+                  : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#30363D]'
+              }`}
+            >
+              <Bot className="w-3.5 h-3.5 shrink-0" />
+              <span>Coding Agents</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  modelSelectorTab === 'agents'
+                    ? 'bg-[#0D1117]/20 text-[#0D1117]'
+                    : 'bg-[#30363D] text-[#C7FF65]'
+                }`}
+              >
+                {agentIntegrations.filter((i) => i.overallState === 'Ready').length}/{agentIntegrations.length || 4}
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={() => setModelSelectorTab('antigravity')}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                 modelSelectorTab === 'antigravity'
-                  ? 'bg-[#58A6FF] text-[#0D1117] shadow-sm'
+                  ? 'bg-[#58A6FF] text-[#0D1117] shadow-sm font-bold'
                   : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#30363D]'
               }`}
             >
               <Sparkles className="w-3.5 h-3.5 shrink-0" />
-              <span>Antigravity (Local Host)</span>
+              <span>Antigravity</span>
               <span
                 className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                   modelSelectorTab === 'antigravity'
@@ -1390,7 +1461,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             {currentChatMode === 'agent' ? (
               <div
                 title="Local AI models are not supported in Agent Mode. Switch to Normal Chat to use Local AI."
-                className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 opacity-40 cursor-not-allowed bg-[#21262D] text-[#8B949E] border border-[#30363D]"
+                className="min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 opacity-40 cursor-not-allowed bg-[#21262D] text-[#8B949E] border border-[#30363D] shrink-0"
               >
                 <HardDrive className="w-3.5 h-3.5 shrink-0" />
                 <span>Local AI (Disabled)</span>
@@ -1399,14 +1470,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
               <button
                 type="button"
                 onClick={() => setModelSelectorTab('local')}
-                className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                   modelSelectorTab === 'local'
-                    ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm'
+                    ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm font-bold'
                     : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#30363D]'
                 }`}
               >
                 <HardDrive className="w-3.5 h-3.5 shrink-0" />
-                <span>Local AI (GGUF)</span>
+                <span>Local AI</span>
                 <span
                   className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                     modelSelectorTab === 'local'
@@ -1422,14 +1493,14 @@ export const ChatTab: React.FC<ChatTabProps> = ({
             <button
               type="button"
               onClick={() => setModelSelectorTab('cloud')}
-              className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`min-h-[36px] px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer shrink-0 ${
                 modelSelectorTab === 'cloud'
-                  ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm'
+                  ? 'bg-[#C7FF65] text-[#0D1117] shadow-sm font-bold'
                   : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC] hover:bg-[#30363D]'
               }`}
             >
               <Cloud className="w-3.5 h-3.5 shrink-0" />
-              <span>Cloud Providers</span>
+              <span>Cloud</span>
               <span
                 className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
                   modelSelectorTab === 'cloud'
@@ -1444,7 +1515,164 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
           {/* Scrollable Content Body */}
           <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-            {modelSelectorTab === 'antigravity' ? (
+            {modelSelectorTab === 'agents' ? (
+              <div className="space-y-3">
+                {/* Intro Guidance */}
+                <div className="p-3 rounded-xl bg-[#0D1117] border border-[#30363D] flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-2">
+                    <Bot className="w-4 h-4 text-[#C7FF65]" />
+                    <span className="text-[#8B949E]">
+                      Select an autonomous agent, test harness, or host engine:
+                    </span>
+                  </div>
+                  {onNavigateToTools && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowModelDropdown(false);
+                        onNavigateToTools('integrations');
+                      }}
+                      className="text-[#C7FF65] hover:underline flex items-center gap-1 font-semibold text-[11px] cursor-pointer"
+                    >
+                      <span>Manage in Tools</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+
+                {/* 4 Agent Tool Cards */}
+                {loadingIntegrations && agentIntegrations.length === 0 ? (
+                  <div className="p-8 text-center text-xs text-[#8B949E] flex flex-col items-center justify-center gap-2">
+                    <RefreshCw className="w-5 h-5 animate-spin text-[#C7FF65]" />
+                    <span>Loading coding agent integrations...</span>
+                  </div>
+                ) : (
+                  agentIntegrations.map((item) => {
+                    const isSelected = activeConv?.providerId === item.id;
+                    const isReady = item.overallState === 'Ready';
+
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-3.5 rounded-xl border transition-all ${
+                          isSelected
+                            ? 'bg-[#1C2128] border-[#C7FF65] ring-1 ring-[#C7FF65]/30'
+                            : 'bg-[#0D1117] border-[#30363D] hover:border-[#30363D]/80'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2.5">
+                          <div className="flex items-start gap-2.5">
+                            <div
+                              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border"
+                              style={{
+                                backgroundColor: `${item.accentColor}15`,
+                                borderColor: `${item.accentColor}30`,
+                                color: item.accentColor,
+                              }}
+                            >
+                              {item.id === 'mobile-harness' ? (
+                                <Smartphone className="w-4 h-4" />
+                              ) : item.id === 'antigravity' ? (
+                                <Sparkles className="w-4 h-4" />
+                              ) : item.id === 'opencode' ? (
+                                <Code2 className="w-4 h-4" />
+                              ) : (
+                                <Bot className="w-4 h-4" />
+                              )}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-semibold text-xs text-[#F0F6FC]">
+                                  {item.name}
+                                </span>
+                                {item.installedVersion && (
+                                  <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-[#161B22] text-[#C7FF65]">
+                                    v{item.installedVersion}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-[#8B949E] mt-0.5 line-clamp-2">
+                                {item.description}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Status Badge */}
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border shrink-0 ${
+                              item.overallState === 'Ready'
+                                ? 'bg-[#72D9A0]/15 text-[#72D9A0] border-[#72D9A0]/30'
+                                : item.overallState === 'Installed'
+                                ? 'bg-[#58A6FF]/15 text-[#58A6FF] border-[#58A6FF]/30'
+                                : item.overallState === 'Authentication required'
+                                ? 'bg-[#DB6D28]/15 text-[#DB6D28] border-[#DB6D28]/30'
+                                : item.overallState === 'Unsupported on this device'
+                                ? 'bg-[#21262D] text-[#8B949E] border-[#30363D]'
+                                : 'bg-[#21262D] text-[#8B949E] border-[#30363D]'
+                            }`}
+                          >
+                            {item.overallState}
+                          </span>
+                        </div>
+
+                        {/* Available Models List & Selection */}
+                        <div className="mt-2.5 pt-2 border-t border-[#30363D]/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {item.availableModels.map((m) => {
+                              const isThisModelActive =
+                                isSelected && activeConv?.modelId === m.id;
+                              return (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  onClick={() => handleSelectCloudModel(item.id, m.id)}
+                                  className={`px-2 py-1 rounded-lg text-[10px] font-mono font-medium transition-all cursor-pointer ${
+                                    isThisModelActive
+                                      ? 'bg-[#C7FF65] text-[#0D1117] font-bold shadow-xs'
+                                      : 'bg-[#161B22] border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC]'
+                                  }`}
+                                >
+                                  {m.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* 1-Tap Connect or Configure Button */}
+                          <div className="shrink-0">
+                            {isReady || item.overallState === 'Installed' ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSelectCloudModel(
+                                    item.id,
+                                    item.availableModels[0]?.id || ''
+                                  )
+                                }
+                                className="min-h-[30px] px-3 py-1 rounded-lg bg-[#C7FF65] text-[#0D1117] text-xs font-bold hover:bg-[#d6ff85] transition-all cursor-pointer shadow-sm"
+                              >
+                                {isSelected ? 'Connected ✓' : 'Select & Connect'}
+                              </button>
+                            ) : onNavigateToTools ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowModelDropdown(false);
+                                  onNavigateToTools('integrations');
+                                }}
+                                className="min-h-[30px] px-3 py-1 rounded-lg bg-[#21262D] hover:bg-[#30363D] text-[#58A6FF] text-xs font-semibold transition-all cursor-pointer border border-[#30363D]"
+                              >
+                                Configure in Tools →
+                              </button>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : modelSelectorTab === 'antigravity' ? (
               <div className="space-y-3">
                 {/* Antigravity Local Host Banner */}
                 <div className="p-3.5 rounded-xl bg-[#0D1117] border border-[#58A6FF]/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 text-xs">

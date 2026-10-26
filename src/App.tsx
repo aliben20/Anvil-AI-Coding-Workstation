@@ -158,6 +158,7 @@ export function App() {
   const [sessionsDrawerOpen, setSessionsDrawerOpen] = useState(false);
   const [showWorkspaceHeaderDropdown, setShowWorkspaceHeaderDropdown] = useState(false);
   const [queuedTerminalCommand, setQueuedTerminalCommand] = useState<string | null>(null);
+  const [toolsSubView, setToolsSubView] = useState<'tools' | 'integrations' | 'bundles' | 'mcp'>('tools');
 
   // Authoritative Environment & Runtime State
   const [envReport, setEnvReport] = useState<EnvironmentReport | null>(null);
@@ -1494,6 +1495,10 @@ export function App() {
               onNavigateToPreview={() => setActiveTab('preview')}
               onNavigateToAgents={() => setActiveTab('agents')}
               onNavigateToSkills={() => setActiveTab('skills')}
+              onNavigateToTools={(subView) => {
+                setToolsSubView(subView || 'integrations');
+                setActiveTab('tools');
+              }}
               subagentTasks={subagentTasks}
               onRefreshTasks={() => {
                 fetch('/api/subagents')
@@ -1635,7 +1640,16 @@ export function App() {
                 permissions={permissions}
                 onUpdatePermission={handleUpdatePermission}
                 activeWorkspaceId={activeWorkspaceId}
-                defaultSubView="tools"
+                defaultSubView={toolsSubView}
+                onSelectAgentIntegration={(integrationId, modelId) => {
+                  if (activeConv) {
+                    handleUpdateConversationMeta(activeConv.id, {
+                      providerId: integrationId,
+                      modelId: modelId || undefined,
+                    });
+                  }
+                  setActiveTab('chat');
+                }}
               />
             </TabErrorBoundary>
           )}

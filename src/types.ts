@@ -518,6 +518,75 @@ export interface ToolchainDiagnosticReport {
   timestamp: number;
 }
 
+export type AgentIntegrationId = 'mobile-harness' | 'antigravity' | 'opencode' | 'claude-code';
+
+export type IntegrationLifecycleState =
+  | 'Not installed'
+  | 'Installing'
+  | 'Installed'
+  | 'Authentication required'
+  | 'Connecting'
+  | 'Ready'
+  | 'Failed'
+  | 'Unsupported on this device';
+
+export interface IntegrationCapabilityFlags {
+  chat: boolean;
+  streaming: boolean;
+  tools: boolean;
+  terminal: boolean;
+  workspaceAccess: boolean;
+  agentExecution: boolean;
+}
+
+export interface IntegrationModelOrProfile {
+  id: string;
+  name: string;
+  description: string;
+  type: 'model' | 'agent_profile';
+  contextWindowTokens?: number;
+  supportsTools: boolean;
+  supportsStreaming: boolean;
+  badge?: string;
+}
+
+export interface AgentToolIntegration {
+  id: AgentIntegrationId;
+  name: string;
+  category: 'coding_agent' | 'host_connection' | 'test_harness';
+  iconKey: 'mobile-harness' | 'antigravity' | 'opencode' | 'claude-code';
+  accentColor: string;
+  description: string;
+  longDescription: string;
+  supportedPlatforms: string[];
+  supportedArchitectures: string[];
+  installationMethod: string;
+  runtimeRequirements: string;
+  overallState: IntegrationLifecycleState;
+  installStatus: 'installed' | 'not_installed' | 'installing' | 'unsupported';
+  authStatus: 'authenticated' | 'auth_required' | 'not_required' | 'invalid';
+  connectionState: 'ready' | 'connecting' | 'failed' | 'offline' | 'unsupported';
+  availableModels: IntegrationModelOrProfile[];
+  capabilities: IntegrationCapabilityFlags;
+  executablePath?: string | null;
+  installedVersion?: string | null;
+  hostUrl?: string | null;
+  isRemoteHost: boolean;
+  requiresApiKey: boolean;
+  hasStoredApiKey: boolean;
+  lastVerifiedAtMillis: number | null;
+  lastVerificationResult: {
+    success: boolean;
+    version?: string;
+    message: string;
+    details?: string;
+  } | null;
+  installProgress?: {
+    fraction: number;
+    stageMessage: string;
+  } | null;
+}
+
 export type ToolchainInstallStatus =
   | 'installed'
   | 'not_installed'

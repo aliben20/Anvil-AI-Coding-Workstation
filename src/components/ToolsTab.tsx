@@ -29,6 +29,12 @@ import {
   CheckCheck,
   ShieldCheck,
   Package,
+  Bot,
+  Sparkles,
+  Smartphone,
+  Settings2,
+  ExternalLink,
+  Shield,
 } from 'lucide-react';
 import {
   AgentActivityEvent,
@@ -43,6 +49,9 @@ import {
   MobileHarnessBundleSpec,
   PlatformCompatibilityReport,
   DiskSpaceInfo,
+  AgentToolIntegration,
+  AgentIntegrationId,
+  IntegrationLifecycleState,
 } from '../types';
 
 interface ToolsTabProps {
@@ -52,7 +61,8 @@ interface ToolsTabProps {
   permissions: Record<PermissionCategory, PermissionPolicy>;
   onUpdatePermission: (category: PermissionCategory, policy: PermissionPolicy) => void;
   activeWorkspaceId: string;
-  defaultSubView?: 'tools' | 'bundles' | 'mcp';
+  defaultSubView?: 'tools' | 'integrations' | 'bundles' | 'mcp';
+  onSelectAgentIntegration?: (integrationId: AgentIntegrationId, modelId?: string) => void;
 }
 
 const AndroidLogoIcon: React.FC<{ className?: string; color?: string }> = ({
@@ -75,13 +85,26 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
   onUpdatePermission,
   activeWorkspaceId,
   defaultSubView = 'tools',
+  onSelectAgentIntegration,
 }) => {
-  const [subView, setSubView] = useState<'tools' | 'bundles' | 'mcp'>(defaultSubView);
+  const [subView, setSubView] = useState<'tools' | 'integrations' | 'bundles' | 'mcp'>(defaultSubView);
 
   // Sync subView if defaultSubView prop changes
   useEffect(() => {
     setSubView(defaultSubView);
   }, [defaultSubView]);
+
+  // Coding Agents State
+  const [integrations, setIntegrations] = useState<AgentToolIntegration[]>([]);
+  const [loadingIntegrations, setLoadingIntegrations] = useState(false);
+  const [verifyingIntegrationId, setVerifyingIntegrationId] = useState<AgentIntegrationId | null>(null);
+  const [installingIntegrationId, setInstallingIntegrationId] = useState<AgentIntegrationId | null>(null);
+  const [configuringIntegration, setConfiguringIntegration] = useState<AgentToolIntegration | null>(null);
+  const [configHostUrl, setConfigHostUrl] = useState('');
+  const [configMode, setConfigMode] = useState<'local' | 'remote_host'>('local');
+  const [configApiKey, setConfigApiKey] = useState('');
+  const [showConfigApiKey, setShowConfigApiKey] = useState(false);
+  const [savingConfig, setSavingConfig] = useState(false);
 
   // Toolchains State
   const [toolchains, setToolchains] = useState<ToolchainItemState[]>([]);
@@ -163,11 +186,122 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
     }
   }, []);
 
+  // Load Coding Agent Integrations
+  const loadIntegrations = useCallback(async () => {
+    setLoadingIntegrations(true);
+    try {
+      const res = await fetch('/api/integrations');
+      const data = await res.json();
+      if (Array.isArray(data.integrations)) {
+        setIntegrations(data.integrations);
+      }
+    } catch {
+      // transient network error
+    } finally {
+      setLoadingIntegrations(false);
+    }
+  }, []);
+
+  const handleVerifyIntegration = async (id: AgentIntegrationId) => {
+    setVerifyingIntegrationId(id);
+    try {
+      const res = await fetch(`/api/integrations/${encodeURIComponent(id)}/verify`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.integration) {
+        setIntegrations((prev) =>
+          prev.map((item) => (item.id === id ? data.integration : item))
+        );
+        setBanner({
+          type: data.success ? 'ok' : 'err',
+          text: data.message || `Verification completed for ${id}.`,
+        });
+        setTimeout(() => setBanner(null), 4000);
+      }
+    } catch {
+      setBanner({ type: 'err', text: `Failed to verify integration ${id}.` });
+    } finally {
+      setVerifyingIntegrationId(null);
+    }
+  };
+
+  const handleInstallIntegration = async (id: AgentIntegrationId) => {
+    setInstallingIntegrationId(id);
+    try {
+      const res = await fetch(`/api/integrations/${encodeURIComponent(id)}/install`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (data.integration) {
+        setIntegrations((prev) =>
+          prev.map((item) => (item.id === id ? data.integration : item))
+        );
+        setBanner({
+          type: data.success ? 'ok' : 'err',
+          text: data.message || `Installation completed for ${id}.`,
+        });
+        setTimeout(() => setBanner(null), 4500);
+      }
+    } catch {
+      setBanner({ type: 'err', text: `Failed to install integration ${id}.` });
+    } finally {
+      setInstallingIntegrationId(null);
+    }
+  };
+
+  const handleOpenConfigureIntegration = (item: AgentToolIntegration) => {
+    setConfiguringIntegration(item);
+    setConfigHostUrl(item.hostUrl || '');
+    setConfigMode(item.isRemoteHost ? 'remote_host' : 'local');
+    setConfigApiKey('');
+    setShowConfigApiKey(false);
+  };
+
+  const handleSaveIntegrationConfig = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!configuringIntegration) return;
+    setSavingConfig(true);
+    try {
+      const res = await fetch(
+        `/api/integrations/${encodeURIComponent(configuringIntegration.id)}/configure`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            hostUrl: configHostUrl.trim() || undefined,
+            connectionMode: configMode,
+            apiKey: configApiKey.trim() || undefined,
+          }),
+        }
+      );
+      const data = await res.json();
+      if (data.integration) {
+        setIntegrations((prev) =>
+          prev.map((item) =>
+            item.id === data.integration.id ? data.integration : item
+          )
+        );
+        setBanner({
+          type: 'ok',
+          text: `Configured ${data.integration.name} successfully.`,
+        });
+        setTimeout(() => setBanner(null), 3500);
+      }
+      setConfiguringIntegration(null);
+    } catch {
+      setBanner({ type: 'err', text: 'Failed to update configuration.' });
+    } finally {
+      setSavingConfig(false);
+    }
+  };
+
   useEffect(() => {
     loadToolchains();
     loadBundles();
     loadMcpServers();
-  }, [loadToolchains, loadBundles, loadMcpServers]);
+    loadIntegrations();
+  }, [loadToolchains, loadBundles, loadMcpServers, loadIntegrations]);
 
   // Subscribe to live SSE toolchain progress stream
   useEffect(() => {
@@ -347,6 +481,52 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
     return true;
   });
 
+  const getStateBadge = (state: IntegrationLifecycleState) => {
+    switch (state) {
+      case 'Ready':
+        return {
+          bg: 'bg-[#72D9A0]/15 text-[#72D9A0] border-[#72D9A0]/30',
+          icon: <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />,
+        };
+      case 'Installed':
+        return {
+          bg: 'bg-[#58A6FF]/15 text-[#58A6FF] border-[#58A6FF]/30',
+          icon: <Check className="w-3.5 h-3.5 shrink-0" />,
+        };
+      case 'Installing':
+        return {
+          bg: 'bg-[#C7FF65]/15 text-[#C7FF65] border-[#C7FF65]/30',
+          icon: <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />,
+        };
+      case 'Connecting':
+        return {
+          bg: 'bg-[#E3B341]/15 text-[#E3B341] border-[#E3B341]/30',
+          icon: <RefreshCw className="w-3.5 h-3.5 shrink-0 animate-spin" />,
+        };
+      case 'Authentication required':
+        return {
+          bg: 'bg-[#DB6D28]/15 text-[#DB6D28] border-[#DB6D28]/30',
+          icon: <Lock className="w-3.5 h-3.5 shrink-0" />,
+        };
+      case 'Failed':
+        return {
+          bg: 'bg-[#FF727A]/15 text-[#FF727A] border-[#FF727A]/30',
+          icon: <XCircle className="w-3.5 h-3.5 shrink-0" />,
+        };
+      case 'Unsupported on this device':
+        return {
+          bg: 'bg-[#21262D] text-[#8B949E] border-[#30363D]',
+          icon: <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-[#E3B341]" />,
+        };
+      case 'Not installed':
+      default:
+        return {
+          bg: 'bg-[#21262D] text-[#8B949E] border-[#30363D]',
+          icon: <Download className="w-3.5 h-3.5 shrink-0" />,
+        };
+    }
+  };
+
   const connectedMcpCount = mcpServers.filter((s) => s.lastStatus === 'connected').length;
 
   return (
@@ -369,6 +549,28 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
             <span>Tools & Compilers</span>
             <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-[#21262D] text-[#8B949E]">
               {toolchains.filter((t) => t.status === 'installed').length}/{toolchains.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubView('integrations')}
+            className={`min-h-[36px] px-3.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all shrink-0 ${
+              subView === 'integrations'
+                ? 'bg-[#21262D] text-[#C7FF65] shadow-sm'
+                : 'text-[#8B949E] hover:text-[#F0F6FC]'
+            }`}
+          >
+            <Bot className="w-4 h-4 shrink-0" />
+            <span>Coding Agents</span>
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-mono font-bold ${
+                subView === 'integrations'
+                  ? 'bg-[#C7FF65]/20 text-[#C7FF65]'
+                  : 'bg-[#21262D] text-[#8B949E]'
+              }`}
+            >
+              {integrations.filter((i) => i.overallState === 'Ready').length}/{integrations.length || 4}
             </span>
           </button>
 
@@ -411,6 +613,20 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
 
         {/* Right Header Buttons */}
         <div className="flex items-center gap-2">
+          {subView === 'integrations' && (
+            <button
+              type="button"
+              onClick={() => loadIntegrations()}
+              disabled={loadingIntegrations}
+              className="min-h-[36px] px-3 py-1.5 rounded-xl bg-[#161B22] border border-[#30363D] text-[#8B949E] hover:text-[#F0F6FC] text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+              title="Refresh coding agent integrations"
+              aria-label="Refresh coding agent integrations"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingIntegrations ? 'animate-spin text-[#C7FF65]' : ''}`} />
+              <span className="hidden sm:inline">Verify All</span>
+            </button>
+          )}
+
           {subView === 'mcp' && (
             <button
               type="button"
@@ -800,6 +1016,290 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
       )}
 
       {/* =========================================================================
+          VIEW: CODING AGENTS & AI TOOLCHAINS (Mobile Harness, Antigravity, OpenCode, Claude Code)
+          ========================================================================= */}
+      {subView === 'integrations' && (
+        <div className="flex-1 min-h-0 min-w-0 max-w-full overflow-y-auto p-4 sm:p-6 space-y-4">
+          <div className="max-w-4xl mx-auto space-y-4">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-[#F0F6FC] flex items-center gap-2">
+                  <Bot className="w-6 h-6 text-[#C7FF65]" />
+                  Coding Agents & AI Toolchains
+                </h2>
+                <p className="text-xs text-[#8B949E] mt-1">
+                  Verified autonomous agents, host daemons, and test harnesses. Truthful runtime probing distinguishes ARM64 binaries, PRoot environments, and remote lab hosts.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg text-xs font-mono bg-[#161B22] border border-[#30363D] text-[#8B949E]">
+                  Host ABI: {compatibility?.platform || 'android'} ({compatibility?.arch || 'arm64-v8a'})
+                </span>
+              </div>
+            </div>
+
+            {/* Loading state */}
+            {loadingIntegrations && integrations.length === 0 ? (
+              <div className="p-12 text-center text-xs text-[#8B949E] bg-[#161B22] border border-[#30363D] rounded-2xl flex flex-col items-center justify-center gap-3">
+                <RefreshCw className="w-6 h-6 animate-spin text-[#C7FF65]" />
+                <span>Probing coding agent runtimes & host bridges...</span>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {integrations.map((item) => {
+                  const isVerifying = verifyingIntegrationId === item.id;
+                  const isInstalling = installingIntegrationId === item.id;
+                  const stateBadge = getStateBadge(item.overallState);
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="bg-[#161B22] border border-[#30363D] rounded-2xl p-4 sm:p-5 space-y-3.5 transition-all hover:border-[#30363D]/80"
+                    >
+                      {/* Top Header Row */}
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className="w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 shadow-inner"
+                            style={{
+                              backgroundColor: `${item.accentColor}15`,
+                              borderColor: `${item.accentColor}40`,
+                              color: item.accentColor,
+                            }}
+                          >
+                            {item.id === 'mobile-harness' ? (
+                              <Smartphone className="w-5 h-5" />
+                            ) : item.id === 'antigravity' ? (
+                              <Sparkles className="w-5 h-5" />
+                            ) : item.id === 'opencode' ? (
+                              <Code2 className="w-5 h-5" />
+                            ) : (
+                              <Bot className="w-5 h-5" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-bold text-sm sm:text-base text-[#F0F6FC]">
+                                {item.name}
+                              </span>
+                              {item.installedVersion && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#0D1117] text-[#C7FF65] border border-[#30363D]">
+                                  v{item.installedVersion}
+                                </span>
+                              )}
+                              <span className="px-2 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider bg-[#21262D] text-[#8B949E]">
+                                {item.category.replace('_', ' ')}
+                              </span>
+                            </div>
+                            <p className="text-xs text-[#8B949E] mt-0.5">
+                              {item.description}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Status Badge */}
+                        <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${stateBadge.bg}`}
+                          >
+                            {stateBadge.icon}
+                            <span>{item.overallState}</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Capabilities & Mode Badges */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1 text-[11px]">
+                        <span className="text-[#8B949E] mr-1">Connection:</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#0D1117] border border-[#30363D] text-[#58A6FF]">
+                          {item.isRemoteHost ? `Remote: ${item.hostUrl || 'host'}` : 'Local Process'}
+                        </span>
+
+                        <span className="text-[#8B949E] mx-1">|</span>
+                        <span className="text-[#8B949E] mr-1">Capabilities:</span>
+                        {item.capabilities.chat && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#C7FF65]/10 text-[#C7FF65] border border-[#C7FF65]/20 font-medium">
+                            Chat
+                          </span>
+                        )}
+                        {item.capabilities.streaming && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#58A6FF]/10 text-[#58A6FF] border border-[#58A6FF]/20 font-medium">
+                            Stream
+                          </span>
+                        )}
+                        {item.capabilities.tools && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#E3B341]/10 text-[#E3B341] border border-[#E3B341]/20 font-medium">
+                            Tools
+                          </span>
+                        )}
+                        {item.capabilities.terminal && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#DB6D28]/10 text-[#DB6D28] border border-[#DB6D28]/20 font-medium">
+                            Terminal
+                          </span>
+                        )}
+                        {item.capabilities.workspaceAccess && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#BC8CFF]/10 text-[#BC8CFF] border border-[#BC8CFF]/20 font-medium">
+                            Workspace
+                          </span>
+                        )}
+                        {item.capabilities.agentExecution && (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] bg-[#72D9A0]/10 text-[#72D9A0] border border-[#72D9A0]/20 font-medium">
+                            Autonomous Loop
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Technical Specs & Runtime Requirements */}
+                      <div className="p-3 rounded-xl bg-[#0D1117] border border-[#30363D]/70 space-y-1.5 text-xs">
+                        <div className="flex items-start gap-2">
+                          <Cpu className="w-3.5 h-3.5 text-[#8B949E] shrink-0 mt-0.5" />
+                          <div>
+                            <span className="text-[#8B949E]">Requirements: </span>
+                            <span className="text-[#F0F6FC] font-medium">
+                              {item.runtimeRequirements}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <Layers className="w-3.5 h-3.5 text-[#8B949E] shrink-0 mt-0.5" />
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[#8B949E]">Supported Platforms: </span>
+                            {item.supportedPlatforms.map((plat) => (
+                              <span
+                                key={plat}
+                                className="px-1.5 py-0.2 rounded text-[10px] bg-[#161B22] text-[#8B949E] border border-[#30363D]"
+                              >
+                                {plat}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        {item.availableModels.length > 0 && (
+                          <div className="flex items-start gap-2 pt-1 border-t border-[#30363D]/40">
+                            <Bot className="w-3.5 h-3.5 text-[#C7FF65] shrink-0 mt-0.5" />
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[#8B949E]">Exposed Models/Profiles: </span>
+                              {item.availableModels.map((m) => (
+                                <span
+                                  key={m.id}
+                                  className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#161B22] text-[#C7FF65] border border-[#C7FF65]/30 font-semibold"
+                                >
+                                  {m.name}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Verification Status Banner */}
+                      {item.lastVerificationResult && (
+                        <div
+                          className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                            item.lastVerificationResult.success
+                              ? 'bg-[#72D9A0]/10 border-[#72D9A0]/30 text-[#72D9A0]'
+                              : 'bg-[#FF727A]/10 border-[#FF727A]/30 text-[#FF727A]'
+                          }`}
+                        >
+                          {item.lastVerificationResult.success ? (
+                            <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                          ) : (
+                            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                          )}
+                          <div className="flex-1">
+                            <div className="font-semibold">
+                              {item.lastVerificationResult.message}
+                            </div>
+                            {item.lastVerificationResult.details && (
+                              <div className="text-[11px] opacity-80 mt-1 font-mono break-all">
+                                {item.lastVerificationResult.details}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Action Buttons Row */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-[#30363D]/60">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {/* Verify Action */}
+                          <button
+                            type="button"
+                            onClick={() => handleVerifyIntegration(item.id)}
+                            disabled={isVerifying}
+                            className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#F0F6FC] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw
+                              className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin text-[#C7FF65]' : ''}`}
+                            />
+                            <span>{isVerifying ? 'Verifying...' : 'Verify'}</span>
+                          </button>
+
+                          {/* Configure Action */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenConfigureIntegration(item)}
+                            className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#F0F6FC] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Settings2 className="w-3.5 h-3.5 text-[#58A6FF]" />
+                            <span>Configure</span>
+                          </button>
+
+                          {/* Install / Update Action if supported */}
+                          {item.overallState !== 'Unsupported on this device' && (
+                            <button
+                              type="button"
+                              onClick={() => handleInstallIntegration(item.id)}
+                              disabled={isInstalling}
+                              className="min-h-[38px] px-3.5 py-1.5 rounded-xl bg-[#21262D] hover:bg-[#30363D] text-[#F0F6FC] text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                              <Download
+                                className={`w-3.5 h-3.5 ${isInstalling ? 'animate-spin text-[#C7FF65]' : 'text-[#C7FF65]'}`}
+                              />
+                              <span>
+                                {isInstalling
+                                  ? 'Installing...'
+                                  : item.installStatus === 'installed'
+                                  ? 'Reinstall'
+                                  : 'Install'}
+                              </span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Select in Chat Button */}
+                        {onSelectAgentIntegration && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onSelectAgentIntegration(
+                                item.id,
+                                item.availableModels[0]?.id
+                              )
+                            }
+                            disabled={item.overallState === 'Unsupported on this device'}
+                            className={`min-h-[38px] px-4 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
+                              item.overallState === 'Ready'
+                                ? 'bg-[#C7FF65] text-[#0D1117] hover:bg-[#d6ff85] shadow-sm'
+                                : 'bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC]'
+                            }`}
+                          >
+                            <Bot className="w-3.5 h-3.5 shrink-0" />
+                            <span>Select in Chat</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
           VIEW 2: DEVELOPER BUNDLES & REPOSITORY RESOURCES
           ========================================================================= */}
       {subView === 'bundles' && (
@@ -1136,6 +1636,133 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                   className="min-h-[36px] px-4 rounded-xl bg-[#C7FF65] text-[#0D1117] font-semibold hover:bg-[#d6ff85]"
                 >
                   Save & Connect
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* =========================================================================
+          CONFIGURE CODING AGENT INTEGRATION MODAL
+          ========================================================================= */}
+      {configuringIntegration && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-black/75 backdrop-blur-sm"
+            onClick={() => setConfiguringIntegration(null)}
+          />
+          <div className="relative w-full max-w-md bg-[#161B22] border border-[#30363D] rounded-2xl shadow-2xl p-5 space-y-4 z-10">
+            <div className="flex items-center justify-between pb-3 border-b border-[#30363D]">
+              <div className="font-semibold text-sm text-[#F0F6FC] flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-[#C7FF65]" />
+                <span>Configure {configuringIntegration.name}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfiguringIntegration(null)}
+                title="Close modal"
+                aria-label="Close modal"
+                className="p-1 text-[#8B949E] hover:text-[#F0F6FC] cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveIntegrationConfig} className="space-y-3.5 text-xs">
+              {/* Host URL Input */}
+              <div>
+                <label className="block text-[#8B949E] mb-1 font-medium">
+                  Host / Lab Bridge URL
+                </label>
+                <input
+                  type="text"
+                  value={configHostUrl}
+                  onChange={(e) => setConfigHostUrl(e.target.value)}
+                  placeholder={
+                    configuringIntegration.id === 'mobile-harness'
+                      ? 'http://127.0.0.1:8000'
+                      : configuringIntegration.id === 'antigravity'
+                      ? 'http://localhost:59895'
+                      : 'http://127.0.0.1:3000'
+                  }
+                  className="w-full min-h-[38px] px-3 rounded-xl bg-[#0D1117] border border-[#30363D] text-[#F0F6FC] font-mono focus:border-[#C7FF65] focus:outline-none"
+                />
+                <p className="text-[10px] text-[#8B949E] mt-1">
+                  Connect to a local daemon or remote lab server over the network.
+                </p>
+              </div>
+
+              {/* Mode Selector */}
+              <div>
+                <label className="block text-[#8B949E] mb-1 font-medium">Execution Mode</label>
+                <select
+                  value={configMode}
+                  onChange={(e) => setConfigMode(e.target.value as 'local' | 'remote_host')}
+                  className="w-full min-h-[38px] px-3 rounded-xl bg-[#0D1117] border border-[#30363D] text-[#F0F6FC] focus:border-[#C7FF65] focus:outline-none"
+                >
+                  <option value="local">Local Binary / CLI Process</option>
+                  <option value="remote_host">Remote Host / Lab Server Bridge</option>
+                </select>
+              </div>
+
+              {/* API Key Input */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[#8B949E] font-medium">
+                    {configuringIntegration.id === 'claude-code'
+                      ? 'Anthropic API Key'
+                      : configuringIntegration.id === 'antigravity'
+                      ? 'Google Gemini API Key'
+                      : configuringIntegration.id === 'opencode'
+                      ? 'OpenRouter or OpenAI API Key'
+                      : 'API / Authentication Token (Optional)'}
+                  </label>
+                  {configuringIntegration.hasStoredApiKey && (
+                    <span className="text-[10px] text-[#72D9A0] font-mono">
+                      ✓ Stored in Vault
+                    </span>
+                  )}
+                </div>
+                <div className="relative">
+                  <input
+                    type={showConfigApiKey ? 'text' : 'password'}
+                    value={configApiKey}
+                    onChange={(e) => setConfigApiKey(e.target.value)}
+                    placeholder={
+                      configuringIntegration.hasStoredApiKey
+                        ? 'Leave empty to keep existing key'
+                        : 'sk-ant-•••• or AIza••••'
+                    }
+                    className="w-full min-h-[38px] px-3 pr-14 rounded-xl bg-[#0D1117] border border-[#30363D] text-[#F0F6FC] font-mono focus:border-[#C7FF65] focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfigApiKey((v) => !v)}
+                    className="absolute right-2.5 top-2.5 text-[#8B949E] hover:text-[#F0F6FC] cursor-pointer text-[11px]"
+                  >
+                    {showConfigApiKey ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-[#8B949E] mt-1">
+                  Stored securely in workstation vault. Never logged or transmitted in cleartext.
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#30363D]">
+                <button
+                  type="button"
+                  onClick={() => setConfiguringIntegration(null)}
+                  className="min-h-[36px] px-4 rounded-xl bg-[#21262D] text-[#8B949E] hover:text-[#F0F6FC]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingConfig}
+                  className="min-h-[36px] px-4 rounded-xl bg-[#C7FF65] text-[#0D1117] font-semibold hover:bg-[#d6ff85] disabled:opacity-50 cursor-pointer"
+                >
+                  {savingConfig ? 'Saving...' : 'Save & Verify'}
                 </button>
               </div>
             </form>

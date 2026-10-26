@@ -51,7 +51,8 @@ import {
 } from './src/server/toolchainManager.js';
 import { SkillsManager } from './src/server/skillsManager.js';
 import { DiagnosticsRunner, DIAGNOSTIC_CATEGORIES } from './src/server/diagnosticsRunner.js';
-import { AgentProfile, SkillDefinition } from './src/types.js';
+import { AgentProfile, SkillDefinition, AgentIntegrationId } from './src/types.js';
+import { AgentToolIntegrationManager } from './src/server/agentToolIntegrationManager.js';
 import crypto from 'crypto';
 
 const PORT = 3000;
@@ -79,6 +80,12 @@ export const buildServiceManager = new BuildServiceManager(
   DATA_DIR
 );
 export const memoryMcpManager = new MemoryAndMcpManager(DATA_DIR, vault, ROOT_DIR);
+export const agentToolIntegrationManager = new AgentToolIntegrationManager(
+  DATA_DIR,
+  ROOT_DIR,
+  (k) => vault.getActiveSecret(k),
+  (k, v) => vault.saveCredential(k, 'Primary Key', v)
+);
 export const toolchainManager = new MobileHarnessToolchainManager(
   DATA_DIR,
   ROOT_DIR,
@@ -1174,7 +1181,19 @@ function createProviderModelTurnGenerator(conv: Conversation): (params: {
     if (!provider) {
       throw new Error(`Unknown provider: ${conv.providerId}`);
     }
-    const apiKey = vault.getActiveSecret(provider.id);
+    let apiKey = vault.getActiveSecret(provider.id);
+    if (!apiKey) {
+      if (provider.id === 'claude-code') {
+        apiKey = vault.getActiveSecret('anthropic') || process.env.ANTHROPIC_API_KEY || null;
+      } else if (provider.id === 'opencode') {
+        apiKey =
+          vault.getActiveSecret('openrouter') ||
+          vault.getActiveSecret('openai') ||
+          process.env.OPENROUTER_API_KEY ||
+          process.env.OPENAI_API_KEY ||
+          null;
+      }
+    }
     if (provider.requiresApiKey && !apiKey) {
       throw new Error(
         `Authentication Required: No API key stored for ${provider.name}. Open Settings -> AI Providers to configure credentials.`
@@ -1722,6 +1741,67 @@ export function createApp() {
   // --------------------------------------------------------------------------
   // PROVIDERS, CREDENTIALS, CUSTOM ENDPOINTS & UNIVERSAL MODEL DISCOVERY
   // --------------------------------------------------------------------------
+  // --------------------------------------------------------------------------
+  // AGENT TOOL INTEGRATIONS (Mobile Harness, Antigravity, OpenCode, Claude Code)
+  // --------------------------------------------------------------------------
+  app.get('/api/integrations', async (_req, res) => {
+    try {
+      const integrations = await agentToolIntegrationManager.getAllIntegrations();
+      res.json({ integrations });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/api/integrations/:id', async (req, res) => {
+    try {
+      const id = req.params.id as AgentIntegrationId;
+      const integration = await agentToolIntegrationManager.getIntegration(id);
+      if (!integration) {
+        res.status(404).json({ error: `Integration '${id}' not found.` });
+        return;
+      }
+      res.json({ integration });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/integrations/:id/verify', async (req, res) => {
+    try {
+      const id = req.params.id as AgentIntegrationId;
+      const result = await agentToolIntegrationManager.verifyIntegration(id);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/integrations/:id/configure', async (req, res) => {
+    try {
+      const id = req.params.id as AgentIntegrationId;
+      const { hostUrl, connectionMode, apiKey } = req.body || {};
+      const integration = await agentToolIntegrationManager.configureIntegration(id, {
+        hostUrl,
+        connectionMode,
+        apiKey,
+      });
+      res.json({ integration });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/integrations/:id/install', async (req, res) => {
+    try {
+      const id = req.params.id as AgentIntegrationId;
+      const result = await agentToolIntegrationManager.installIntegration(id);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.get('/api/providers', (_req, res) => {
     const creds = vault.listCredentials();
     const all = getAllProviders();
@@ -5007,6 +5087,88 @@ function getDefaultModelsForProvider(providerId: string): DiscoveredModel[] {
         supportsTools: true,
         supportsVision: true,
         isFreeTierVerified: false,
+      },
+    ];
+  }
+  if (providerId === 'claude-code') {
+    return [
+      {
+        id: 'claude-3-7-sonnet',
+        displayName: 'Claude 3.7 Sonnet (Claude Code CLI / Agent)',
+        providerId: 'claude-code',
+        contextWindowTokens: 200000,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: true,
+        isFreeTierVerified: false,
+      },
+      {
+        id: 'claude-3-5-sonnet',
+        displayName: 'Claude 3.5 Sonnet (Claude Code CLI)',
+        providerId: 'claude-code',
+        contextWindowTokens: 200000,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: true,
+        isFreeTierVerified: false,
+      },
+      {
+        id: 'claude-3-5-haiku',
+        displayName: 'Claude 3.5 Haiku (Claude Code Fast)',
+        providerId: 'claude-code',
+        contextWindowTokens: 200000,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: false,
+        isFreeTierVerified: false,
+      },
+    ];
+  }
+  if (providerId === 'opencode') {
+    return [
+      {
+        id: 'opencode-react',
+        displayName: 'OpenCode Full-Repository Agent (ReAct Loop)',
+        providerId: 'opencode',
+        contextWindowTokens: 128000,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: false,
+        isFreeTierVerified: true,
+      },
+      {
+        id: 'opencode-planner',
+        displayName: 'OpenCode Architect & Planner',
+        providerId: 'opencode',
+        contextWindowTokens: 128000,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: false,
+        isFreeTierVerified: true,
+      },
+    ];
+  }
+  if (providerId === 'mobile-harness') {
+    return [
+      {
+        id: 'mobile-harness-android-inspector',
+        displayName: 'Mobile Harness Android Device Inspector',
+        providerId: 'mobile-harness',
+        contextWindowTokens: 32768,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: true,
+        isFreeTierVerified: true,
+      },
+      {
+        id: 'mobile-harness-device-runner',
+        displayName: 'Mobile Harness Automated Test & Lab Runner',
+        providerId: 'mobile-harness',
+        contextWindowTokens: 32768,
+        supportsStreaming: true,
+        supportsTools: true,
+        supportsVision: false,
+        isFreeTierVerified: true,
       },
     ];
   }
