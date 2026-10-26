@@ -37,6 +37,7 @@ export type TaskExecutionState =
   | 'completed'
   | 'stopped_at_limit'
   | 'failed'
+  | 'missing_prerequisite'
   | 'cancelled';
 
 export type ToolExecutionStatus =
@@ -478,9 +479,10 @@ export type ToolchainId =
   | 'python'
   | 'android'
   | 'cpp'
-  | 'php';
+  | 'php'
+  | 'linux-runtime';
 
-export type OptionalToolchainId = 'web' | 'python' | 'android' | 'cpp' | 'php' | 'opencode';
+export type OptionalToolchainId = 'web' | 'python' | 'android' | 'cpp' | 'php' | 'opencode' | 'linux-runtime';
 
 export type ToolchainCategory = 'core' | 'optional';
 
@@ -501,7 +503,19 @@ export type ToolchainDiagnosticStage =
   | 'ARCHIVE_EXTRACTION'
   | 'BINARY_VERIFICATION'
   | 'EXECUTION_PERMISSION'
-  | 'ENVIRONMENT_PROBE';
+  | 'ENVIRONMENT_PROBE'
+  | 'PREREQUISITE_CHECK';
+
+export interface LinuxRuntimeState {
+  status: 'not_installed' | 'installing' | 'verifying' | 'ready' | 'failed' | 'unsupported';
+  version: string | null;
+  prootBinaryPath: string | null;
+  rootfsPath: string | null;
+  lastHealthCheckMillis: number | null;
+  lastHealthCheckOutput?: string | null;
+  lastError: string | null;
+  diagnostic?: ToolchainDiagnosticReport | null;
+}
 
 export interface ToolchainDiagnosticReport {
   toolId: string;
@@ -596,6 +610,7 @@ export type ToolchainInstallStatus =
   | 'updating'
   | 'uninstalling'
   | 'failed'
+  | 'missing_prerequisite'
   | 'incomplete'
   | 'unsupported';
 
@@ -617,7 +632,7 @@ export interface ToolchainItemState {
   estimatedDownloadBytes: number;
   estimatedInstalledBytes: number;
   accentColor: string;
-  iconKey: 'terminal' | 'globe' | 'python' | 'android' | 'cpu' | 'server' | 'git' | 'node';
+  iconKey: 'terminal' | 'globe' | 'python' | 'android' | 'cpu' | 'server' | 'git' | 'node' | 'linux';
   status: ToolchainInstallStatus;
   installedVersion: string | null;
   verifiedAtMillis: number | null;
@@ -627,6 +642,8 @@ export interface ToolchainItemState {
   binaries: ToolchainBinaryCheck[];
   platformClassification?: ToolchainPlatformClassification;
   diagnostic?: ToolchainDiagnosticReport | null;
+  prerequisiteToolchainId?: ToolchainId;
+  prerequisiteStatus?: 'satisfied' | 'missing' | 'installing' | 'failed';
   usedByWorkspaces?: Array<{
     workspaceId: string;
     workspaceName: string;
@@ -778,6 +795,7 @@ export interface ToolchainManagerStatus {
   activeJob: ToolchainJobProgress | null;
   workspaces: WorkspaceToolchainStatus[];
   repositoryResources: MobileHarnessRepoResourceCatalog | null;
+  linuxRuntime?: LinuxRuntimeState;
   activeWorkspaceId?: string;
 }
 

@@ -666,3 +666,140 @@ test('18. Error dismissal and diagnostic clearing (clearToolchainError)', () => 
   assert.equal(pyItemCleared.lastError, null);
   assert.equal(pyItemCleared.diagnostic, null);
 });
+
+test('19. PHP prerequisite check blocks installation when PRoot runtime is absent on Android / proot_linux', async () => {
+  const testDataDir = path.join(TEST_DIR, 'php-prereq-missing-test');
+  fs.mkdirSync(testDataDir, { recursive: true });
+  const mgr = new MobileHarnessToolchainManager(testDataDir);
+
+  // Simulate Android environment by setting ANDROID_ROOT
+  const prevAndroidRoot = process.env.ANDROID_ROOT;
+  process.env.ANDROID_ROOT = '/system';
+
+  try {
+    // 1. Probing toolchains without PRoot runtime must mark PHP as missing_prerequisite with exact diagnostic report
+    const status = mgr.getFullStatus();
+    const phpItem = status.toolchains.find((t) => t.id === 'php');
+    assert.ok(phpItem, 'PHP toolchain must be present in catalog');
+    assert.equal(phpItem.prerequisiteToolchainId, 'linux-runtime');
+    assert.equal(phpItem.prerequisiteStatus, 'missing');
+    assert.equal(phpItem.status, 'missing_prerequisite');
+    assert.ok(phpItem.lastError?.includes('PRoot Linux compatibility layer is not installed on this Android device.'));
+    assert.ok(phpItem.diagnostic);
+    assert.equal(phpItem.diagnostic?.stage, 'ENVIRONMENT_PROBE');
+    assert.equal(phpItem.diagnostic?.exceptionType, 'InstallationError');
+    assert.equal(
+      phpItem.diagnostic?.actionableMessage,
+      'PRoot Linux compatibility layer is not installed on this Android device.'
+    );
+
+    // 2. Calling startToolchainJob with PHP must fail the job with diagnostic error matching user report
+    const job = await mgr.startToolchainJob({
+      operation: 'install',
+      toolchainIds: ['php'],
+    });
+
+    // Wait for pipeline execution to complete
+    let pollCount = 0;
+    while (job.status === 'running' && pollCount < 50) {
+      await new Promise((r) => setTimeout(r, 100));
+      pollCount++;
+    }
+
+    assert.equal(job.status, 'failed');
+    assert.ok(job.errorMessage?.includes('PRoot Linux compatibility layer is not installed on this Android device.'));
+    assert.ok(job.diagnostic);
+    assert.equal(job.diagnostic?.stage, 'ENVIRONMENT_PROBE');
+    assert.equal(job.diagnostic?.exceptionType, 'InstallationError');
+    assert.equal(
+      job.diagnostic?.actionableMessage,
+      'PRoot Linux compatibility layer is not installed on this Android device.'
+    );
+  } finally {
+    if (prevAndroidRoot !== undefined) {
+      process.env.ANDROID_ROOT = prevAndroidRoot;
+    } else {
+      delete process.env.ANDROID_ROOT;
+    }
+  }
+});
+
+test('20. Shared Linux runtime installation service sets up PRoot and rootfs with truthful health check', async () => {
+  const testDataDir = path.join(TEST_DIR, 'linux-runtime-install-test');
+  fs.mkdirSync(testDataDir, { recursive: true });
+  const mgr = new MobileHarnessToolchainManager(testDataDir);
+
+  const initialStatus = mgr.getLinuxRuntimeStatus();
+  assert.notEqual(initialStatus.status, 'ready');
+
+  // Pre-seed mock rootfs archive so unit test executes instantly without re-downloading 72MB
+  const downloadsDir = mgr['mobileHarnessDownloadsDir'];
+  fs.mkdirSync(downloadsDir, { recursive: true });
+  const preseededFile = path.join(downloadsDir, 'pocketdev-core-arm64-2026.09.5.tar.zst');
+  fs.writeFileSync(preseededFile, Buffer.from('MOCK_ROOTFS_ARCHIVE_DATA'));
+
+  // Install runtime
+  const result = await mgr.installLinuxRuntime();
+  assert.equal(result.success, true);
+  assert.ok(result.prootBinaryPath);
+  assert.ok(result.rootfsPath);
+  assert.equal(fs.existsSync(result.prootBinaryPath), true);
+  assert.equal(fs.existsSync(result.rootfsPath), true);
+
+  // Check runtime status after installation
+  const runtimeStatus = mgr.getLinuxRuntimeStatus();
+  assert.equal(runtimeStatus.status, 'ready');
+  assert.equal(runtimeStatus.lastError, null);
+  assert.ok(runtimeStatus.prootBinaryPath);
+  assert.ok(runtimeStatus.rootfsPath);
+  assert.ok(runtimeStatus.lastHealthCheckMillis);
+
+  // Verify persistence across new manager instance
+  const mgr2 = new MobileHarnessToolchainManager(testDataDir);
+  const reloadedStatus = mgr2.getLinuxRuntimeStatus();
+  assert.equal(reloadedStatus.status, 'ready');
+});
+
+test('21. Once Linux runtime prerequisite is satisfied, PHP prerequisiteStatus is resolved', () => {
+  const testDataDir = path.join(TEST_DIR, 'php-prereq-resolved-test');
+  fs.mkdirSync(testDataDir, { recursive: true });
+  const mgr = new MobileHarnessToolchainManager(testDataDir);
+
+  // Set up verified mock PRoot structure in this isolated test directory
+  const rootfsDir = path.join(testDataDir, 'toolchains', 'rootfs');
+  const binDir = path.join(testDataDir, 'toolchains', 'bin');
+  fs.mkdirSync(path.join(rootfsDir, 'bin'), { recursive: true });
+  fs.mkdirSync(path.join(rootfsDir, 'etc'), { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(rootfsDir, 'etc', 'os-release'),
+    'PRETTY_NAME="Ubuntu 20.04.5 LTS"\nNAME="Ubuntu"\nVERSION_ID="20.04"\n'
+  );
+  fs.writeFileSync(path.join(rootfsDir, 'bin', 'sh'), '#!/bin/sh\nexit 0\n');
+  const prootBin = path.join(binDir, process.platform === 'win32' ? 'proot.cmd' : 'proot');
+  fs.writeFileSync(
+    prootBin,
+    process.platform === 'win32'
+      ? '@echo off\r\necho obsidian-linux-runtime-ok\r\n'
+      : '#!/bin/sh\necho obsidian-linux-runtime-ok\n'
+  );
+  if (process.platform !== 'win32') fs.chmodSync(prootBin, 0o755);
+
+  const prevAndroidRoot = process.env.ANDROID_ROOT;
+  process.env.ANDROID_ROOT = '/system';
+
+  try {
+    const status = mgr.getFullStatus();
+    const phpItem = status.toolchains.find((t) => t.id === 'php');
+    assert.ok(phpItem);
+    assert.equal(phpItem.prerequisiteStatus, 'satisfied');
+    assert.notEqual(phpItem.status, 'missing_prerequisite');
+  } finally {
+    if (prevAndroidRoot !== undefined) {
+      process.env.ANDROID_ROOT = prevAndroidRoot;
+    } else {
+      delete process.env.ANDROID_ROOT;
+    }
+  }
+});
+

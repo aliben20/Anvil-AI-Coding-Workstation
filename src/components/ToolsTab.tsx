@@ -56,6 +56,7 @@ import {
   IntegrationLifecycleState,
   ToolchainDiagnosticStage,
   ToolchainDiagnosticReport,
+  LinuxRuntimeState,
 } from '../types';
 
 interface ToolsTabProps {
@@ -140,6 +141,32 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
 
   // Toast Banner
   const [banner, setBanner] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
+
+  // Linux / PRoot Runtime State
+  const [linuxRuntime, setLinuxRuntime] = useState<LinuxRuntimeState | null>(null);
+  const [isInstallingRuntime, setIsInstallingRuntime] = useState(false);
+
+  const handleInstallLinuxRuntime = async () => {
+    if (isInstallingRuntime || (activeJob && activeJob.status === 'running')) return;
+    setIsInstallingRuntime(true);
+    try {
+      const res = await fetch('/api/toolchains/linux-runtime/install', { method: 'POST' });
+      const data = await res.json();
+      if (data.job) setActiveJob(data.job);
+      if (data.status?.toolchains) setToolchains(data.status.toolchains);
+      if (data.status?.linuxRuntime) setLinuxRuntime(data.status.linuxRuntime);
+      setBanner({
+        type: 'ok',
+        text: 'Linux/PRoot runtime installation initiated.',
+      });
+      setTimeout(() => setBanner(null), 3500);
+      loadToolchains();
+    } catch {
+      setBanner({ type: 'err', text: 'Failed to initiate Linux runtime installation.' });
+    } finally {
+      setIsInstallingRuntime(false);
+    }
+  };
 
   // Diagnostic Error Details Modal State
   const [errorModalData, setErrorModalData] = useState<{
@@ -284,6 +311,7 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
       if (data.activeJob) setActiveJob(data.activeJob);
       if (data.compatibility) setCompatibility(data.compatibility);
       if (data.diskSpace) setDiskSpace(data.diskSpace);
+      if (data.linuxRuntime) setLinuxRuntime(data.linuxRuntime);
     } catch {
       // transient network error
     } finally {
@@ -469,6 +497,24 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
 
   // Install / Update Toolchain
   const handleInstallToolchain = async (id: ToolchainId, operation: 'install' | 'update') => {
+    // Prerequisite check: tools requiring Linux runtime (PHP CLI & Composer)
+    const targetTc = toolchains.find((t) => t.id === id);
+    if (
+      (targetTc?.prerequisiteToolchainId === 'linux-runtime' || id === 'php') &&
+      (!linuxRuntime || linuxRuntime.status !== 'ready')
+    ) {
+      setErrorModalData({
+        toolId: id,
+        title: `${targetTc?.title || 'PHP-CLI & Composer'} Diagnostic Details`,
+        stage: 'PREREQUISITE_CHECK',
+        exceptionType: 'InstallationError',
+        message: 'PRoot Linux compatibility layer is not installed on this Android device.\n\nPHP-CLI and Composer require an isolated Linux ARM64 root filesystem and PRoot compatibility layer to execute on Android.',
+        timestamp: Date.now(),
+        canRetry: true,
+        retryAction: () => handleInstallToolchain(id, operation),
+      });
+      return;
+    }
     setToolchainActionId(id);
     try {
       const res = await fetch(`/api/toolchains/${encodeURIComponent(id)}/${operation}`, {
@@ -1001,6 +1047,61 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
               </div>
             )}
 
+            {/* Linux PRoot Compatibility Layer Status */}
+            <div className="p-3.5 sm:p-4 rounded-2xl bg-[#161B22] border border-[#30363D] flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-[#21262D] border border-[#30363D] flex items-center justify-center shrink-0">
+                  <Server className="w-4 h-4 text-[#C7FF65]" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-[#F0F6FC]">PRoot Linux Compatibility Layer</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
+                      linuxRuntime?.status === 'ready'
+                        ? 'bg-[#72D9A0]/15 text-[#72D9A0] border border-[#72D9A0]/30'
+                        : isInstallingRuntime || (activeJob?.currentToolchainId === 'linux-runtime' && activeJob?.status === 'running')
+                        ? 'bg-[#388BFD]/15 text-[#388BFD] border border-[#388BFD]/30'
+                        : 'bg-[#E3B341]/15 text-[#E3B341] border border-[#E3B341]/30'
+                    }`}>
+                      {linuxRuntime?.status === 'ready'
+                        ? 'Verified Ready'
+                        : isInstallingRuntime || (activeJob?.currentToolchainId === 'linux-runtime' && activeJob?.status === 'running')
+                        ? 'Installing...'
+                        : 'Required for PHP & C++'}
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-[#8B949E] mt-0.5">
+                    {linuxRuntime?.status === 'ready'
+                      ? `Isolated ARM64 Linux rootfs & PRoot binary operational (${linuxRuntime.version || 'v2026.09.5'})`
+                      : 'Provides isolated ARM64 Ubuntu environment necessary to run PHP-CLI, Composer, and C++ toolchains on Android.'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {linuxRuntime?.status !== 'ready' && (
+                  <button
+                    type="button"
+                    onClick={handleInstallLinuxRuntime}
+                    disabled={Boolean(isInstallingRuntime || (activeJob && activeJob.status === 'running'))}
+                    className="min-h-[44px] px-3.5 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isInstallingRuntime || (activeJob?.currentToolchainId === 'linux-runtime' && activeJob?.status === 'running') ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Installing Runtime...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Install Linux Runtime</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Toolchain Cards List */}
             <div className="space-y-3">
               {filteredToolchains.map((tc) => {
@@ -1010,6 +1111,13 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                 const isUpdating = tc.status === 'updating';
                 const isFailed = tc.status === 'failed';
                 const isActionBusy = toolchainActionId === tc.id;
+                const isPrerequisiteMissing =
+                  (tc.prerequisiteToolchainId === 'linux-runtime' || tc.id === 'php') &&
+                  (!linuxRuntime || linuxRuntime.status !== 'ready') &&
+                  !isInstalled;
+                const isRuntimeBusy =
+                  isInstallingRuntime ||
+                  (activeJob?.currentToolchainId === 'linux-runtime' && activeJob?.status === 'running');
 
                 return (
                   <div
@@ -1071,6 +1179,20 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                             <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                             <span>Failed · Details</span>
                           </button>
+                        ) : isPrerequisiteMissing ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenErrorDetails(tc);
+                            }}
+                            title="Linux runtime required. Tap for details and installer."
+                            aria-label={`Linux runtime required for ${tc.title}`}
+                            className="min-h-[44px] px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 bg-[#E3B341]/15 hover:bg-[#E3B341]/25 text-[#E3B341] border border-[#E3B341]/40 transition-colors cursor-pointer"
+                          >
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                            <span>Linux runtime required</span>
+                          </button>
                         ) : (
                           <span
                             className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 ${
@@ -1090,17 +1212,40 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                         {/* Action Buttons */}
                         <div className="flex items-center gap-1.5">
                           {!isInstalled ? (
-                            <button
-                              type="button"
-                              onClick={() => handleInstallToolchain(tc.id, 'install')}
-                              disabled={isActionBusy || isInstalling}
-                              title={`Download and install ${tc.title}`}
-                              aria-label={`Download and install ${tc.title}`}
-                              className="min-h-[34px] px-3 rounded-lg bg-[#C7FF65] text-[#0D1117] font-semibold text-xs flex items-center gap-1.5 hover:bg-[#d6ff85] transition-colors disabled:opacity-50 cursor-pointer"
-                            >
-                              <Download className="w-3.5 h-3.5" />
-                              <span>Download & Install</span>
-                            </button>
+                            isPrerequisiteMissing ? (
+                              <button
+                                type="button"
+                                onClick={handleInstallLinuxRuntime}
+                                disabled={isActionBusy || isRuntimeBusy}
+                                title={`Install Linux runtime required before installing ${tc.title}`}
+                                aria-label={`Install Linux runtime required for ${tc.title}`}
+                                className="min-h-[44px] px-3.5 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] font-bold text-xs flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {isRuntimeBusy ? (
+                                  <>
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                    <span>Setting up Runtime...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>Install Linux Runtime</span>
+                                  </>
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleInstallToolchain(tc.id, 'install')}
+                                disabled={isActionBusy || isInstalling}
+                                title={`Download and install ${tc.title}`}
+                                aria-label={`Download and install ${tc.title}`}
+                                className="min-h-[34px] px-3 rounded-lg bg-[#C7FF65] text-[#0D1117] font-semibold text-xs flex items-center gap-1.5 hover:bg-[#d6ff85] transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Download & Install</span>
+                              </button>
+                            )
                           ) : (
                             <>
                               {tc.canUpdate && (
@@ -1220,11 +1365,23 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                                 <FileText className="w-3.5 h-3.5" />
                                 <span>Inspect Diagnostics Modal</span>
                               </button>
+                              {isPrerequisiteMissing && (
+                                <button
+                                  type="button"
+                                  onClick={handleInstallLinuxRuntime}
+                                  disabled={isActionBusy || isRuntimeBusy}
+                                  className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#C7FF65] hover:bg-[#d6ff85] font-bold text-xs text-[#0D1117] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                >
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>Install Linux Runtime</span>
+                                </button>
+                              )}
                               <button
                                 type="button"
                                 onClick={() => handleInstallToolchain(tc.id, 'install')}
-                                disabled={isActionBusy || isInstalling}
-                                className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#C7FF65] hover:bg-[#d6ff85] font-bold text-xs text-[#0D1117] flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                                disabled={isActionBusy || isInstalling || isPrerequisiteMissing}
+                                title={isPrerequisiteMissing ? 'Linux runtime must be installed before retrying PHP' : 'Retry Installation'}
+                                className="min-h-[44px] px-3.5 py-1.5 rounded-lg bg-[#C7FF65] hover:bg-[#d6ff85] font-bold text-xs text-[#0D1117] flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <RotateCcw className="w-3.5 h-3.5" />
                                 <span>Retry Installation</span>
@@ -2112,6 +2269,69 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
               </p>
             </div>
 
+            {/* Prerequisite Required Alert Banner */}
+            {(errorModalData.stage === 'PREREQUISITE_CHECK' ||
+              errorModalData.stage === 'ENVIRONMENT_PROBE' ||
+              errorModalData.toolId === 'php' ||
+              errorModalData.message.includes('PRoot')) &&
+              (!linuxRuntime || linuxRuntime.status !== 'ready') && (
+                <div className="p-4 rounded-xl bg-[#E3B341]/10 border border-[#E3B341]/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-[#E3B341] shrink-0" />
+                      <span className="text-xs font-bold text-[#E3B341] uppercase tracking-wider">
+                        Linux Runtime Required
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#E3B341]/20 text-[#E3B341] font-semibold">
+                      {isInstallingRuntime || (activeJob?.currentToolchainId === 'linux-runtime' && activeJob?.status === 'running')
+                        ? 'Installing...'
+                        : 'Missing Prerequisite'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-[#F0F6FC] leading-relaxed">
+                    PHP-CLI and Composer require an isolated Linux ARM64 root filesystem and PRoot compatibility layer to execute on Android. OBSIDIAN cannot execute PHP binaries directly in the Android app environment without this layer.
+                  </p>
+
+                  {isInstallingRuntime || (activeJob?.currentToolchainId === 'linux-runtime' && activeJob?.status === 'running') ? (
+                    <div className="p-3 rounded-lg bg-[#0D1117] border border-[#30363D] space-y-2">
+                      <div className="flex items-center justify-between text-xs font-mono">
+                        <span className="text-[#8B949E] truncate">
+                          {activeJob?.stageMessage || 'Downloading & setting up Linux rootfs...'}
+                        </span>
+                        <span className="text-[#C7FF65] font-bold shrink-0">
+                          {Math.round((activeJob?.fraction || 0) * 100)}%
+                        </span>
+                      </div>
+                      <div className="h-2 w-full bg-[#21262D] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[#C7FF65] rounded-full transition-all duration-200"
+                          style={{ width: `${Math.max(5, Math.round((activeJob?.fraction || 0) * 100))}%` }}
+                        />
+                      </div>
+                      {activeJob && activeJob.totalBytes > 0 && (
+                        <div className="text-[10px] text-[#8B949E] text-right font-mono">
+                          {(activeJob.downloadedBytes / (1024 * 1024)).toFixed(1)} / {(activeJob.totalBytes / (1024 * 1024)).toFixed(1)} MB
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={handleInstallLinuxRuntime}
+                        disabled={isInstallingRuntime || activeJob?.status === 'running'}
+                        className="min-h-[44px] px-4 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] font-bold text-xs flex items-center gap-2 cursor-pointer transition-colors disabled:opacity-50"
+                      >
+                        <Download className="w-4 h-4" />
+                        <span>Install Linux Runtime (72.1 MB)</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
             {/* Diagnostic Metadata breakdown */}
             <div className="p-3.5 rounded-xl bg-[#0D1117] border border-[#30363D] space-y-2 text-xs font-mono">
               <div className="text-[11px] font-bold uppercase tracking-wider text-[#8B949E] pb-1 border-b border-[#30363D]/60">
@@ -2214,6 +2434,23 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                   Dismiss
                 </button>
 
+                {/* Working Prerequisite Action: Install Linux Runtime */}
+                {(errorModalData.stage === 'PREREQUISITE_CHECK' ||
+                  errorModalData.stage === 'ENVIRONMENT_PROBE' ||
+                  errorModalData.toolId === 'php' ||
+                  errorModalData.message.includes('PRoot')) &&
+                  (!linuxRuntime || linuxRuntime.status !== 'ready') && (
+                    <button
+                      type="button"
+                      onClick={handleInstallLinuxRuntime}
+                      disabled={isInstallingRuntime || activeJob?.status === 'running'}
+                      className="min-h-[44px] px-4 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 flex-1 sm:flex-initial"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Install Linux Runtime</span>
+                    </button>
+                  )}
+
                 {errorModalData.canRetry && errorModalData.retryAction && (
                   <button
                     type="button"
@@ -2222,11 +2459,21 @@ export const ToolsTab: React.FC<ToolsTabProps> = ({
                       setErrorModalData(null);
                       act?.();
                     }}
-                    disabled={activeJob?.status === 'running'}
-                    className="min-h-[44px] px-5 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 flex-1 sm:flex-initial"
+                    disabled={
+                      activeJob?.status === 'running' ||
+                      ((errorModalData.toolId === 'php' || errorModalData.stage === 'PREREQUISITE_CHECK') &&
+                        (!linuxRuntime || linuxRuntime.status !== 'ready'))
+                    }
+                    title={
+                      (errorModalData.toolId === 'php' || errorModalData.stage === 'PREREQUISITE_CHECK') &&
+                      (!linuxRuntime || linuxRuntime.status !== 'ready')
+                        ? 'Linux runtime prerequisite required before retrying PHP installation'
+                        : 'Retry operation'
+                    }
+                    className="min-h-[44px] px-5 rounded-xl bg-[#C7FF65] hover:bg-[#d6ff85] text-[#0D1117] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex-1 sm:flex-initial"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Retry Download</span>
+                    <span>{errorModalData.toolId === 'php' ? 'Retry PHP Installation' : 'Retry Download'}</span>
                   </button>
                 )}
               </div>

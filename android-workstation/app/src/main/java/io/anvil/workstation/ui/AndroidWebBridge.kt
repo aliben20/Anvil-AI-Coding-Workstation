@@ -744,9 +744,21 @@ class AndroidWebBridge(
                 toolchainManager.cancelActiveJob().toString()
             }
 
+            pathOnly == "/api/toolchains/linux-runtime" && method == "GET" -> {
+                toolchainManager.getLinuxRuntimeStatus().toString()
+            }
+
+            pathOnly == "/api/toolchains/linux-runtime/install" && method == "POST" -> {
+                toolchainManager.installLinuxRuntime().toString()
+            }
+
             pathOnly.startsWith("/api/toolchains/") && pathOnly.endsWith("/install") && method == "POST" -> {
                 val id = pathOnly.removePrefix("/api/toolchains/").removeSuffix("/install")
-                toolchainManager.startInstallJob(listOf(id)).toString()
+                if (id == "linux-runtime") {
+                    toolchainManager.installLinuxRuntime().toString()
+                } else {
+                    toolchainManager.startInstallJob(listOf(id)).toString()
+                }
             }
 
             pathOnly.startsWith("/api/toolchains/") && pathOnly.endsWith("/update") && method == "POST" -> {

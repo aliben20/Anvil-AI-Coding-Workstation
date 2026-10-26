@@ -1690,6 +1690,37 @@ export function createApp() {
     }
   });
 
+  // Dedicated Linux/PRoot Runtime Lifecycle Endpoints
+  app.get('/api/toolchains/linux-runtime', (_req, res) => {
+    try {
+      const runtime = toolchainManager.getLinuxRuntimeStatus();
+      res.json(runtime);
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/toolchains/linux-runtime/install', async (_req, res) => {
+    try {
+      const job = await toolchainManager.startToolchainJob({
+        operation: 'install',
+        toolchainIds: ['linux-runtime'],
+      });
+      res.json({ job, status: toolchainManager.getFullStatus() });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/toolchains/linux-runtime/verify', async (_req, res) => {
+    try {
+      const runtime = toolchainManager.getLinuxRuntimeStatus();
+      res.json({ ok: runtime.status === 'ready', runtime, status: toolchainManager.getFullStatus() });
+    } catch (err) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // Dedicated OpenCode CLI Safe Diagnostic & Recovery Endpoint (Prevents destructive deletions)
   app.post('/api/toolchains/opencode/safe-verify', async (_req, res) => {
     try {
