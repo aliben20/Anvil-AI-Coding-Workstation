@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   MessageSquare,
   Cpu,
@@ -52,7 +52,7 @@ import { SkillsTab } from './components/SkillsTab';
 import { TerminalTab } from './components/TerminalTab';
 import { SettingsTab } from './components/SettingsTab';
 import { RightInspector } from './components/RightInspector';
-import { FloatingBubble } from './components/FloatingBubble';
+import { FloatingBubble, AppActivityState } from './components/FloatingBubble';
 import { EnvironmentModal } from './components/EnvironmentModal';
 import {
   getEnvironmentReport,
@@ -1123,6 +1123,89 @@ export function App() {
   const runningTask = runningTasks[0] || null;
   const runningTasksCount = runningTasks.length;
 
+  const appActivity = useMemo<AppActivityState>(() => {
+    // 1. Check if any conversation is currently generating / streaming
+    const activeSendingId = Object.keys(sendingConvIds).find((id) => sendingConvIds[id]);
+    const sendingConv = activeSendingId
+      ? conversations.find((c) => c.id === activeSendingId) || activeConv
+      : (activeConv?.taskState === 'running' ? activeConv : null);
+
+    if (sendingConv && (sendingConvIds[sendingConv.id] || sendingConv.taskState === 'running')) {
+      const lastAssistant = sendingConv.messages.slice().reverse().find((m) => m.role === 'assistant');
+      const latestRunningEvent = events.find(
+        (e) => e.conversationId === sendingConv.id && (e.state === 'running' || Date.now() - e.timestampMillis < 4000)
+      );
+
+      const step =
+        lastAssistant?.collaboratorStreamingStatus ||
+        lastAssistant?.streamingStatus ||
+        latestRunningEvent?.title ||
+        (latestRunningEvent?.toolName ? `Tool: ${latestRunningEvent.toolName}` : null) ||
+        'Generating response…';
+
+      const detail = latestRunningEvent?.description || latestRunningEvent?.toolInput || sendingConv.title || 'AI reasoning & execution';
+
+      return {
+        isRunning: true,
+        category: 'ai',
+        title: sendingConv.title && sendingConv.title !== 'New Chat' ? sendingConv.title : 'AI Assistant',
+        step,
+        detail,
+        progress: undefined,
+      };
+    }
+
+    // 2. Check running subagent tasks
+    const runningSubagent = subagentTasks.find((t) => t.status === 'running');
+    if (runningSubagent) {
+      return {
+        isRunning: true,
+        category: 'agent',
+        title: `${runningSubagent.role} Agent`,
+        step: runningSubagent.currentStep || runningSubagent.title || 'Executing plan…',
+        detail: runningSubagent.title,
+        progress: runningSubagent.progress,
+      };
+    }
+
+    // 3. Check recent active tool event within the last 4 seconds
+    const recentRunningEvent = events.find(
+      (e) => e.state === 'running' || (e.state === 'completed' && Date.now() - e.timestampMillis < 3000)
+    );
+    if (recentRunningEvent) {
+      return {
+        isRunning: recentRunningEvent.state === 'running',
+        category: 'tool',
+        title: recentRunningEvent.title || 'Workspace Tool',
+        step: recentRunningEvent.state === 'running' ? 'Executing tool…' : 'Tool completed',
+        detail: recentRunningEvent.description,
+        progress: undefined,
+      };
+    }
+
+    return {
+      isRunning: false,
+      category: 'idle',
+      title: 'OBSIDIAN Workstation',
+      step: 'Workstation idle',
+      detail: 'Ready for tasks',
+      progress: undefined,
+    };
+  }, [conversations, sendingConvIds, activeConv, events, subagentTasks]);
+
+  // Sync real-time activity to native Android overlay & notifications
+  useEffect(() => {
+    if (nativeOverlaySupported) {
+      const bridge = (window as any).AndroidOverlay;
+      bridge?.updateActivity?.(
+        appActivity.title,
+        appActivity.step,
+        appActivity.isRunning,
+        appActivity.progress ?? -1
+      );
+    }
+  }, [appActivity, nativeOverlaySupported]);
+
   return (
     <div className="h-[100dvh] w-full max-w-full overflow-hidden bg-[#0D1117] text-[#F0F6FC] flex flex-col select-none">
       {/* =========================================================================
@@ -1840,8 +1923,10 @@ export function App() {
           onNavigateToChat={() => setActiveTab('chat')}
           onNavigateToTerminal={() => setActiveTab('terminal')}
           onNavigateToTasks={() => setActiveTab('agents')}
+          activity={appActivity}
           activeTask={runningTask}
           runningTasksCount={runningTasksCount}
+          recentEvents={events.slice(0, 3)}
         />
       )}
 

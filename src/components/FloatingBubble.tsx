@@ -8,8 +8,18 @@ import {
   Play,
   RotateCcw,
   Layers,
+  Sparkles,
 } from 'lucide-react';
 import { ObsidianCrystalLogo } from './ChatTab';
+
+export interface AppActivityState {
+  isRunning: boolean;
+  category: 'ai' | 'agent' | 'terminal' | 'tool' | 'idle';
+  title: string;
+  step: string;
+  detail?: string;
+  progress?: number;
+}
 
 interface FloatingBubbleProps {
   enabled: boolean;
@@ -17,6 +27,7 @@ interface FloatingBubbleProps {
   onNavigateToChat: () => void;
   onNavigateToTerminal: () => void;
   onNavigateToTasks: () => void;
+  activity?: AppActivityState;
   activeTask?: {
     role: string;
     title: string;
@@ -25,6 +36,7 @@ interface FloatingBubbleProps {
     currentStep?: string;
   } | null;
   runningTasksCount: number;
+  recentEvents?: Array<{ id: string; title: string; state: string }>;
 }
 
 export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
@@ -33,8 +45,10 @@ export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
   onNavigateToChat,
   onNavigateToTerminal,
   onNavigateToTasks,
+  activity,
   activeTask,
   runningTasksCount,
+  recentEvents = [],
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [pos, setPos] = useState({ x: 0, y: 180 });
@@ -151,7 +165,11 @@ export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
     setIsOverDismissZone(false);
   };
 
-  const isRunning = runningTasksCount > 0 || activeTask?.status === 'Running';
+  const isRunning = Boolean(
+    activity?.isRunning ||
+    (activeTask && (activeTask.status === 'running' || activeTask.status === 'Running')) ||
+    runningTasksCount > 0
+  );
 
   return (
     <>
@@ -224,7 +242,42 @@ export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
             </div>
 
             {/* Active Task / Agent Status */}
-            {activeTask ? (
+            {activity && activity.isRunning ? (
+              <div className="p-3 rounded-xl bg-[#0D1117] border border-[#C7FF65]/40 space-y-2 text-xs shadow-inner">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-[#C7FF65] truncate flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#C7FF65] animate-pulse" />
+                    <span>{activity.title}</span>
+                  </span>
+                  {activity.progress !== undefined && (
+                    <span className="text-[#C7FF65] font-mono font-bold">{activity.progress}%</span>
+                  )}
+                </div>
+
+                <div className="text-[11px] text-[#F0F6FC] font-medium flex items-center gap-1.5">
+                  <Play className="w-3 h-3 text-[#C7FF65] shrink-0" />
+                  <span className="truncate">{activity.step}</span>
+                </div>
+
+                {activity.detail && (
+                  <div className="text-[10px] text-[#8B949E] line-clamp-2 font-mono bg-[#161B22]/70 p-1.5 rounded-lg border border-[#30363D]/50">
+                    {activity.detail}
+                  </div>
+                )}
+
+                {/* Progress bar */}
+                <div className="h-1.5 w-full bg-[#21262D] rounded-full overflow-hidden">
+                  {activity.progress !== undefined ? (
+                    <div
+                      className="h-full bg-[#C7FF65] rounded-full transition-all duration-300 shadow-[0_0_8px_#C7FF65]"
+                      style={{ width: `${Math.max(5, activity.progress)}%` }}
+                    />
+                  ) : (
+                    <div className="h-full bg-[#C7FF65] rounded-full animate-pulse w-full shadow-[0_0_8px_#C7FF65]" />
+                  )}
+                </div>
+              </div>
+            ) : activeTask ? (
               <div className="p-2.5 rounded-xl bg-[#0D1117] border border-[#30363D] space-y-1.5 text-xs">
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="font-semibold text-[#C7FF65] truncate">{activeTask.role} Agent</span>
@@ -243,10 +296,42 @@ export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
                 </div>
               </div>
             ) : (
-              <div className="p-2.5 rounded-xl bg-[#0D1117] border border-[#30363D] text-[11px] text-[#8B949E]">
-                {runningTasksCount > 0
-                  ? `${runningTasksCount} background ${runningTasksCount === 1 ? 'task executing' : 'tasks executing'}.`
-                  : 'Workstation idle. Ready for tasks.'}
+              <div className="p-2.5 rounded-xl bg-[#0D1117] border border-[#30363D] space-y-1">
+                <div className="text-[11px] font-semibold text-[#F0F6FC] flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-[#72D9A0]" />
+                  <span>Workstation Idle</span>
+                </div>
+                <div className="text-[10.5px] text-[#8B949E]">
+                  Ready for tasks, prompts, or terminal commands.
+                </div>
+              </div>
+            )}
+
+            {/* Recent Activity Mini-Feed */}
+            {recentEvents && recentEvents.length > 0 && (
+              <div className="space-y-1 pt-1 border-t border-[#30363D]/60">
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#8B949E]">
+                  Recent Activity
+                </div>
+                <div className="space-y-1 max-h-24 overflow-y-auto no-scrollbar">
+                  {recentEvents.slice(0, 3).map((evt) => (
+                    <div
+                      key={evt.id}
+                      className="px-2 py-1 rounded-lg bg-[#0D1117]/80 border border-[#30363D]/40 text-[10.5px] flex items-center justify-between gap-1.5"
+                    >
+                      <span className="truncate text-[#F0F6FC]">{evt.title}</span>
+                      <span
+                        className={`text-[9.5px] px-1 py-0.2 rounded font-mono shrink-0 ${
+                          evt.state === 'running'
+                            ? 'text-[#C7FF65] bg-[#C7FF65]/10'
+                            : 'text-[#8B949E]'
+                        }`}
+                      >
+                        {evt.state}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -312,6 +397,8 @@ export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
             className={`relative w-12 h-12 rounded-2xl bg-[#161B22]/90 backdrop-blur-md border shadow-2xl flex items-center justify-center cursor-grab active:cursor-grabbing transition-all group focus:outline-none ${
               isOverDismissZone
                 ? 'scale-75 opacity-70 border-[#DA3633] ring-4 ring-[#DA3633]/40 shadow-[0_0_20px_rgba(218,54,51,0.5)]'
+                : isRunning
+                ? 'border-[#C7FF65] ring-2 ring-[#C7FF65]/50 shadow-[0_0_18px_rgba(199,255,101,0.35)]'
                 : 'border-[#30363D] hover:border-[#C7FF65] hover:shadow-[0_0_15px_rgba(199,255,101,0.25)] focus:ring-2 focus:ring-[#C7FF65]'
             }`}
             title="OBSIDIAN Quick Overlay · Tap to expand, drag to move or drag down to X to remove"
@@ -325,6 +412,20 @@ export const FloatingBubble: React.FC<FloatingBubbleProps> = ({
               <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#C7FF65] border-2 border-[#0D1117] flex items-center justify-center shadow-[0_0_6px_#C7FF65]">
                 <span className="w-1.5 h-1.5 rounded-full bg-[#0D1117] animate-ping" />
               </span>
+            )}
+
+            {/* Real-time Ticker Tag / Activity Pill when active */}
+            {activity && activity.isRunning && (
+              <div
+                className={`absolute top-1/2 -translate-y-1/2 pointer-events-none transition-all duration-300 flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#161B22]/95 border border-[#C7FF65]/60 shadow-xl backdrop-blur-md text-[11px] font-mono text-[#F0F6FC] whitespace-nowrap max-w-[210px] truncate ${
+                  pos.x > (typeof window !== 'undefined' ? window.innerWidth / 2 : 180)
+                    ? 'right-full mr-2.5'
+                    : 'left-full ml-2.5'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full bg-[#C7FF65] animate-pulse shrink-0 shadow-[0_0_6px_#C7FF65]" />
+                <span className="truncate text-[#C7FF65] font-semibold">{activity.step}</span>
+              </div>
             )}
           </div>
         )}

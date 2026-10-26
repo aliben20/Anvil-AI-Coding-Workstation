@@ -35,6 +35,8 @@ class FloatingBubbleService : Service() {
 
     private var windowManager: WindowManager? = null
     private var bubbleView: View? = null
+    private var bubbleContainer: FrameLayout? = null
+    private var activityBadge: View? = null
     private var dismissView: FrameLayout? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var dismissLayoutParams: WindowManager.LayoutParams? = null
@@ -42,11 +44,44 @@ class FloatingBubbleService : Service() {
     private var dismissSizePx = 0
     private var isOverDismissZone = false
     private var isForeground = false
+    private var lastTitle: String = "OBSIDIAN"
+    private var lastStep: String = "Ready for tasks"
+    private var lastIsRunning: Boolean = false
+    private var lastProgress: Int = -1
 
     companion object {
         const val ACTION_SHOW = "io.anvil.workstation.ACTION_SHOW_BUBBLE"
         const val ACTION_HIDE = "io.anvil.workstation.ACTION_HIDE_BUBBLE"
         const val ACTION_OVERLAY_DISMISSED = "io.anvil.workstation.ACTION_OVERLAY_DISMISSED"
+        const val ACTION_UPDATE_ACTIVITY = "io.anvil.workstation.ACTION_UPDATE_ACTIVITY"
+        const val EXTRA_TITLE = "extra_title"
+        const val EXTRA_STEP = "extra_step"
+        const val EXTRA_IS_RUNNING = "extra_is_running"
+        const val EXTRA_PROGRESS = "extra_progress"
+
+        fun updateActivity(
+            context: Context,
+            title: String,
+            step: String,
+            isRunning: Boolean,
+            progress: Int
+        ) {
+            if (!canDrawOverlays(context)) return
+            val intent = Intent(context, FloatingBubbleService::class.java).apply {
+                action = ACTION_UPDATE_ACTIVITY
+                putExtra(EXTRA_TITLE, title)
+                putExtra(EXTRA_STEP, step)
+                putExtra(EXTRA_IS_RUNNING, isRunning)
+                putExtra(EXTRA_PROGRESS, progress)
+            }
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (_: Exception) {}
+        }
 
         private const val NOTIFICATION_ID = 4242
         private const val CHANNEL_ID = "obsidian_overlay"
@@ -90,6 +125,18 @@ class FloatingBubbleService : Service() {
         val action = intent?.action ?: ACTION_SHOW
 
         when (action) {
+            ACTION_UPDATE_ACTIVITY -> {
+                val title = intent?.getStringExtra(EXTRA_TITLE) ?: "OBSIDIAN"
+                val step = intent?.getStringExtra(EXTRA_STEP) ?: "Active"
+                val isRunning = intent?.getBooleanExtra(EXTRA_IS_RUNNING, false) ?: false
+                val progress = intent?.getIntExtra(EXTRA_PROGRESS, -1) ?: -1
+                if (bubbleView == null && canDrawOverlays(this)) {
+                    startForegroundCompat()
+                    createAndAttachBubble()
+                }
+                updateBubbleActivity(title, step, isRunning, progress)
+                return START_STICKY
+            }
             ACTION_HIDE -> {
                 removeBubble()
                 stopForegroundCompat()
@@ -265,6 +312,24 @@ class FloatingBubbleService : Service() {
             setPadding(iconPadding, iconPadding, iconPadding, iconPadding)
         }
         container.addView(icon)
+
+        val badge = View(this).apply {
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#C7FF65"))
+            }
+            background = bg
+            val badgeSize = (11 * metrics.density).toInt()
+            layoutParams = FrameLayout.LayoutParams(badgeSize, badgeSize).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = (2 * metrics.density).toInt()
+                rightMargin = (2 * metrics.density).toInt()
+            }
+            visibility = if (lastIsRunning) View.VISIBLE else View.GONE
+        }
+        container.addView(badge)
+        activityBadge = badge
+        bubbleContainer = container
 
         container.setOnTouchListener(object : View.OnTouchListener {
             private var initialX = 0
@@ -474,6 +539,78 @@ class FloatingBubbleService : Service() {
         }
     }
 
+    private fun updateBubbleActivity(title: String, step: String, isRunning: Boolean, progress: Int) {
+        lastTitle = title
+        lastStep = step
+        lastIsRunning = isRunning
+        lastProgress = progress
+
+        // 1. Update system foreground notification with real-time active task
+        if (isForeground) {
+            val manager = getSystemService(NotificationManager::class.java)
+            val launchIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                launchIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val notifText = if (isRunning) step else "Chat head active - tap to open the workstation"
+            val notifTitle = if (isRunning) "OBSIDIAN: $title" else "OBSIDIAN overlay"
+
+            val notifBuilder = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(R.drawable.ic_stat_obsidian)
+                .setContentTitle(notifTitle)
+                .setContentText(notifText)
+                .setContentIntent(pendingIntent)
+                .setOngoing(true)
+                .setSilent(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+
+            if (isRunning && progress in 0..100) {
+                notifBuilder.setProgress(100, progress, false)
+            } else if (isRunning) {
+                notifBuilder.setProgress(100, 0, true)
+            }
+
+            manager?.notify(NOTIFICATION_ID, notifBuilder.build())
+        }
+
+        // 2. Update visual bubble appearance on screen
+        bubbleContainer?.let { container ->
+            val metrics = resources.displayMetrics
+            val bg = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.parseColor("#161B22"))
+                setStroke(
+                    ((if (isRunning) 2.5f else 1.5f) * metrics.density).toInt(),
+                    Color.parseColor(if (isRunning) "#C7FF65" else "#30363D")
+                )
+            }
+            container.background = bg
+        }
+
+        activityBadge?.let { badge ->
+            badge.visibility = if (isRunning) View.VISIBLE else View.GONE
+            if (isRunning) {
+                badge.animate()
+                    .scaleX(1.3f)
+                    .scaleY(1.3f)
+                    .setDuration(400)
+                    .withEndAction {
+                        badge.animate().scaleX(1f).scaleY(1f).setDuration(400).start()
+                    }
+                    .start()
+            }
+        }
+    }
+
     private fun removeBubble() {
         dismissView?.let { dv ->
             try {
@@ -489,6 +626,8 @@ class FloatingBubbleService : Service() {
             }
             bubbleView = null
         }
+        activityBadge = null
+        bubbleContainer = null
         isForeground = false
     }
 

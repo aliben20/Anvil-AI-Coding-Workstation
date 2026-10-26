@@ -73,6 +73,19 @@ class MainActivity : ComponentActivity() {
         }
 
         @JavascriptInterface
+        fun updateActivity(title: String?, step: String?, isRunning: Boolean, progress: Int) {
+            runOnUiThread {
+                FloatingBubbleService.updateActivity(
+                    context = this@MainActivity,
+                    title = title ?: "OBSIDIAN",
+                    step = step ?: "Active",
+                    isRunning = isRunning,
+                    progress = progress,
+                )
+            }
+        }
+
+        @JavascriptInterface
         fun sync(enabled: Boolean) {
             runOnUiThread {
                 if (enabled) {
