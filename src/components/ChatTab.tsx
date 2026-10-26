@@ -3440,39 +3440,7 @@ export const ChatTab: React.FC<ChatTabProps> = ({
 
               <span className="text-[#30363D] hidden sm:inline">•</span>
 
-              {/* Mode Selector Segmented Toggle in Header [ Normal Chat ] [ Agent Mode ] */}
-              <div
-                className="flex items-center p-0.5 rounded-lg bg-[#0D1117] border border-[#30363D] shrink-0"
-                data-testid="header-chat-mode-toggle"
-              >
-                <button
-                  type="button"
-                  onClick={() => handleSetChatMode('normal')}
-                  className={`px-2 py-0.5 sm:px-2.5 rounded-md text-[11px] font-medium transition-all cursor-pointer ${
-                    currentChatMode === 'normal'
-                      ? 'bg-[#21262D] text-[#F0F6FC] font-semibold shadow-xs'
-                      : 'text-[#8B949E] hover:text-[#F0F6FC]'
-                  }`}
-                  title="Normal Chat: Single assistant, standard responses without tools"
-                >
-                  Normal Chat
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetChatMode('agent')}
-                  className={`px-2 py-0.5 sm:px-2.5 rounded-md text-[11px] font-semibold flex items-center gap-1 transition-all cursor-pointer ${
-                    currentChatMode === 'agent'
-                      ? 'bg-[#C7FF65]/15 text-[#C7FF65] border border-[#C7FF65]/40 shadow-xs'
-                      : 'text-[#8B949E] hover:text-[#C7FF65]'
-                  }`}
-                  title="Agent Mode: Autonomous orchestration with tools, collaborator review, and checkpoints"
-                >
-                  <Sparkles className="w-3 h-3 text-[#C7FF65]" />
-                  <span>Agent Mode</span>
-                </button>
-              </div>
-
-              {/* 4. Active Model Pill */}
+              {/* Active Model Pill */}
               <button
                 onClick={() => setShowModelDropdown(true)}
                 className="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-[#21262D] hover:bg-[#30363D] border border-[#30363D] text-[11px] font-mono text-[#8B949E] hover:text-[#C7FF65] transition-colors cursor-pointer truncate max-w-[150px] shrink-0"
