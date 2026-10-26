@@ -53,8 +53,25 @@ type SettingsCategory =
   | 'storage'
   | 'about';
 
+const defaultFallbackSettings: WorkstationSettings = {
+  accentColor: '#C7FF65',
+  fontSize: 'normal',
+  reducedMotion: false,
+  defaultProviderId: 'antigravity',
+  defaultModelId: 'gemini-3.8-flash',
+  requestTimeoutMs: 30000,
+  maxRetries: 1,
+  streamingEnabled: true,
+  maxAgentIterations: 10,
+  maxToolCalls: 16,
+  commandTimeoutMs: 25000,
+  localAiThreads: 4,
+  localAiContextLength: 2048,
+  memoryRetentionDays: 90,
+};
+
 export const SettingsTab: React.FC<SettingsTabProps> = ({
-  providers,
+  providers = [],
   onRefreshProviders,
   settings,
   onUpdateSettings,
@@ -66,6 +83,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   onToggleFloatingBubble,
   onOpenEnvironment,
 }) => {
+  const safeSettings = settings ? { ...defaultFallbackSettings, ...settings } : defaultFallbackSettings;
+  const safeProviders = Array.isArray(providers) ? providers : [];
   // Mobile Category Navigation: null shows the category rows matching Screen 9
   const [selectedCategory, setSelectedCategory] = useState<SettingsCategory | null>(
     focusSection === 'providers' ? 'providers' : null
@@ -428,22 +447,40 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
   };
 
   const handleInspectHost = () => {
+    const nodeVer = typeof process !== 'undefined' && process?.version ? process.version : 'v20.x';
     setHostCheckResult(
-      `OS: Windows 11 / Kernel · Runtime: Node ${process.version || 'v20.x'} · Shell: cmd.exe / powershell`
+      `OS: Windows / Android · Runtime: Node ${nodeVer} · Shell: cmd.exe / powershell / sh`
     );
     setTimeout(() => setHostCheckResult(null), 5000);
   };
 
-  const activeDoc = docs.find((d) => d.path === selectedDocPath) || docs[0];
-  const allDiscoveredModels = providers.flatMap((p) =>
-    p.cachedModels.map((m) => ({ ...m, providerName: p.name, providerConnected: p.connected }))
-  );
+  const activeDoc = (docs || []).find((d) => d.path === selectedDocPath) || (docs && docs[0]) || null;
+  const allDiscoveredModels = safeProviders.flatMap((p) => {
+    const models = Array.isArray(p.cachedModels)
+      ? p.cachedModels
+      : Array.isArray((p as any).models)
+      ? (p as any).models
+      : [];
+    return models.map((m: any) => ({
+      ...m,
+      id: m.id || m.modelId || 'unknown-model',
+      displayName: m.displayName || m.name || m.id || m.modelId || 'Unknown Model',
+      providerId: p.id,
+      providerName: p.name || p.id,
+      providerConnected: !!p.connected,
+      supportsTools: !!m.supportsTools,
+      contextWindowTokens: m.contextWindowTokens || m.contextWindow || 4096,
+      supportsStreaming: m.supportsStreaming !== false,
+      supportsVision: !!m.supportsVision,
+      isFreeTierVerified: !!m.isFreeTierVerified,
+    }));
+  });
   const filteredModels = allDiscoveredModels.filter(
     (m) =>
       !modelSearch.trim() ||
-      m.id.toLowerCase().includes(modelSearch.toLowerCase()) ||
-      m.displayName.toLowerCase().includes(modelSearch.toLowerCase()) ||
-      m.providerName.toLowerCase().includes(modelSearch.toLowerCase())
+      (m.id && m.id.toLowerCase().includes(modelSearch.toLowerCase())) ||
+      (m.displayName && m.displayName.toLowerCase().includes(modelSearch.toLowerCase())) ||
+      (m.providerName && m.providerName.toLowerCase().includes(modelSearch.toLowerCase()))
   );
 
   const categories = [
@@ -457,7 +494,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
     {
       id: 'providers' as SettingsCategory,
       title: 'AI Providers',
-      subtitle: `${providers.filter((p) => p.connected).length} connected of ${providers.length} · Custom URLs`,
+      subtitle: `${safeProviders.filter((p) => p.connected).length} connected of ${safeProviders.length} · Custom URLs`,
       icon: Key,
       iconColor: '#C7FF65',
     },
@@ -626,7 +663,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             </div>
 
             <div className="space-y-3">
-              {providers.map((p) => {
+              {safeProviders.map((p) => {
                 const testStatus = testMessages[p.id];
                 const currentBaseUrlInput = baseUrlInputs[p.id] ?? p.baseUrl;
                 return (
@@ -990,7 +1027,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
 
             <div className="space-y-2 max-h-[500px] overflow-y-auto">
               {filteredModels.map((m) => {
-                const isDefault = settings.defaultModelId === m.id;
+                const isDefault = safeSettings.defaultModelId === m.id;
                 return (
                   <div
                     key={`${m.providerId}-${m.id}`}
@@ -1052,7 +1089,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     { id: 'charcoal', name: 'Slate Charcoal', bg: '#161B22' },
                   ] as const
                 ).map((th) => {
-                  const isSelected = (settings.themePalette || 'dark-graphite') === th.id;
+                  const isSelected = (safeSettings.themePalette || 'dark-graphite') === th.id;
                   return (
                     <button
                       key={th.id}
@@ -1081,7 +1118,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
             <div className="space-y-2 pt-3 border-t border-[#30363D]/60">
               <div className="flex items-center justify-between">
                 <label className="text-[#8B949E] font-semibold">Accent Highlight</label>
-                <span className="font-mono text-[#C7FF65] text-xs">{settings.accentColor || '#C7FF65'}</span>
+                <span className="font-mono text-[#C7FF65] text-xs">{safeSettings.accentColor || '#C7FF65'}</span>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {[
@@ -1091,7 +1128,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   { name: 'Amber Gold', color: '#F4C46A' },
                   { name: 'Royal Violet', color: '#C59BFF' },
                 ].map((acc) => {
-                  const isActive = (settings.accentColor || '#C7FF65').toLowerCase() === acc.color.toLowerCase();
+                  const isActive = (safeSettings.accentColor || '#C7FF65').toLowerCase() === acc.color.toLowerCase();
                   return (
                     <button
                       key={acc.color}
@@ -1117,7 +1154,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
               <label className="text-[#8B949E] font-semibold">Monospace Code Font</label>
               <div className="flex flex-wrap gap-2">
                 {['JetBrains Mono', 'Fira Code', 'Source Code Pro', 'Cascadia Code'].map((font) => {
-                  const activeFont = settings.codeFont || 'JetBrains Mono';
+                  const activeFont = safeSettings.codeFont || 'JetBrains Mono';
                   return (
                     <button
                       key={font}
@@ -1151,7 +1188,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 </div>
                 <input
                   type="checkbox"
-                  checked={settings.toolApprovalAlerts !== false}
+                  checked={safeSettings.toolApprovalAlerts !== false}
                   onChange={(e) => onUpdateSettings({ toolApprovalAlerts: e.target.checked })}
                   aria-label="Tool approval alerts"
                   className="accent-[#C7FF65] w-4 h-4 cursor-pointer"
@@ -1165,7 +1202,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 </div>
                 <input
                   type="checkbox"
-                  checked={settings.buildCompletionAlerts !== false}
+                  checked={safeSettings.buildCompletionAlerts !== false}
                   onChange={(e) => onUpdateSettings({ buildCompletionAlerts: e.target.checked })}
                   aria-label="Build completion alerts"
                   className="accent-[#C7FF65] w-4 h-4 cursor-pointer"
@@ -1349,13 +1386,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                 <div className="space-y-1">
                   <div className="flex justify-between">
                     <span className="text-[#8B949E]">Max Agent Iterations:</span>
-                    <span className="font-mono text-[#C7FF65]">{settings.maxAgentIterations || 10} turns</span>
+                    <span className="font-mono text-[#C7FF65]">{safeSettings.maxAgentIterations || 10} turns</span>
                   </div>
                   <input
                     type="range"
                     min={1}
                     max={25}
-                    value={settings.maxAgentIterations || 10}
+                    value={safeSettings.maxAgentIterations || 10}
                     onChange={(e) => onUpdateSettings({ maxAgentIterations: Number(e.target.value) })}
                     aria-label="Maximum agent iterations"
                     className="w-full accent-[#C7FF65]"
@@ -1366,7 +1403,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                   <div className="flex justify-between">
                     <span className="text-[#8B949E]">Shell Command Timeout:</span>
                     <span className="font-mono text-[#C7FF65]">
-                      {Math.round((settings.commandTimeoutMs || 25000) / 1000)}s
+                      {Math.round((safeSettings.commandTimeoutMs || 25000) / 1000)}s
                     </span>
                   </div>
                   <input
@@ -1374,7 +1411,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({
                     min={5000}
                     max={60000}
                     step={5000}
-                    value={settings.commandTimeoutMs || 25000}
+                    value={safeSettings.commandTimeoutMs || 25000}
                     onChange={(e) => onUpdateSettings({ commandTimeoutMs: Number(e.target.value) })}
                     aria-label="Shell command timeout"
                     className="w-full accent-[#C7FF65]"

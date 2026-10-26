@@ -329,7 +329,7 @@ export function App() {
       }
       if (provRes.providers) setProviders(provRes.providers);
       if (wsRes.workspaces) setWorkspaces(wsRes.workspaces);
-      if (setRes.settings) setSettings(setRes.settings);
+      if (setRes.settings) setSettings((prev) => ({ ...defaultSettingsState, ...prev, ...setRes.settings }));
       if (setRes.permissions) setPermissions(setRes.permissions);
       if (evRes.events) setEvents(evRes.events);
       if (evRes.pendingApprovals) setPendingApprovals(evRes.pendingApprovals);
@@ -384,7 +384,7 @@ export function App() {
         try {
           const payload = JSON.parse(e.data);
           if (payload.settings) {
-            setSettings(payload.settings);
+            setSettings((prev) => ({ ...defaultSettingsState, ...prev, ...payload.settings }));
             window.dispatchEvent(
               new CustomEvent('obsidian:settings_updated', { detail: payload.settings })
             );
@@ -1077,7 +1077,7 @@ export function App() {
       });
       const data = await res.json();
       if (data.settings) {
-        setSettings(data.settings);
+        setSettings((prev) => ({ ...defaultSettingsState, ...prev, ...data.settings }));
         window.dispatchEvent(
           new CustomEvent('obsidian:settings_updated', { detail: data.settings })
         );
@@ -1652,25 +1652,27 @@ export function App() {
           )}
 
           {(activeTab === 'settings' || activeTab === 'providers') && (
-            <SettingsTab
-              providers={providers}
-              onRefreshProviders={() => {
-                fetch('/api/providers')
-                  .then((r) => r.json())
-                  .then((d) => {
-                    if (d.providers) setProviders(d.providers);
-                  });
-              }}
-              settings={settings}
-              onUpdateSettings={handleUpdateSettings}
-              focusSection={activeTab === 'providers' ? 'providers' : 'settings'}
-              activeWorkspace={activeWorkspace}
-              onSelectWorkspace={(wsId) => setActiveWorkspaceId(wsId)}
-              workspaces={workspaces}
-              floatingBubbleEnabled={floatingBubbleEnabled}
-              onToggleFloatingBubble={handleToggleFloatingBubble}
-              onOpenEnvironment={() => setShowEnvironmentModal(true)}
-            />
+            <TabErrorBoundary>
+              <SettingsTab
+                providers={providers}
+                onRefreshProviders={() => {
+                  fetch('/api/providers')
+                    .then((r) => r.json())
+                    .then((d) => {
+                      if (d.providers) setProviders(d.providers);
+                    });
+                }}
+                settings={settings}
+                onUpdateSettings={handleUpdateSettings}
+                focusSection={activeTab === 'providers' ? 'providers' : 'settings'}
+                activeWorkspace={activeWorkspace}
+                onSelectWorkspace={(wsId) => setActiveWorkspaceId(wsId)}
+                workspaces={workspaces}
+                floatingBubbleEnabled={floatingBubbleEnabled}
+                onToggleFloatingBubble={handleToggleFloatingBubble}
+                onOpenEnvironment={() => setShowEnvironmentModal(true)}
+              />
+            </TabErrorBoundary>
           )}
 
         </main>

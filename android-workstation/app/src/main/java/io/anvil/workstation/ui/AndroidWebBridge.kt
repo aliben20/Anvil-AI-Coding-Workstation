@@ -434,13 +434,26 @@ class AndroidWebBridge(
                 }.toString()
             }
 
-            pathOnly.startsWith("/api/skills/") && pathOnly.endsWith("/toggle") && method == "POST" -> {
+            pathOnly == "/api/skills/rescan" && (method == "POST" || method == "GET") -> {
+                val arr = JSONArray()
+                viewModel.skills.forEach { sk ->
+                    arr.put(skillToJson(sk, includeInstructions = false))
+                }
+                JSONObject().apply {
+                    put("success", true)
+                    put("skills", arr)
+                    put("count", viewModel.skills.size)
+                }.toString()
+            }
+
+            pathOnly.startsWith("/api/skills/") && pathOnly.endsWith("/toggle") && (method == "POST" || method == "PATCH") -> {
                 val id = pathOnly.removePrefix("/api/skills/").removeSuffix("/toggle")
                 mainHandler.post { viewModel.toggleSkill(id) }
                 val sk = viewModel.skills.firstOrNull { it.id == id }
                 JSONObject().apply {
                     put("success", true)
                     if (sk != null) {
+                        put("enabled", !sk.enabled)
                         put("skill", skillToJson(sk.copy(enabled = !sk.enabled), includeInstructions = true))
                     }
                 }.toString()
@@ -501,26 +514,39 @@ class AndroidWebBridge(
                 val arr = JSONArray()
                 WorkstationViewModel.PROVIDERS.forEach { p ->
                     val hasKey = auth.getActiveSecret(p.id) != null
+                    val modelsArr = JSONArray()
+                    viewModel.modelCatalog.filter { it.providerId == p.id }.forEach { m ->
+                        modelsArr.put(JSONObject().apply {
+                            put("id", m.modelId)
+                            put("displayName", m.modelId)
+                            put("name", m.modelId)
+                            put("providerId", p.id)
+                            put("providerName", p.label)
+                            put("description", m.description)
+                            put("contextWindow", m.contextWindow)
+                            put("contextWindowTokens", m.contextWindow)
+                            put("supportsStreaming", true)
+                            put("supportsTools", true)
+                            put("supportsVision", false)
+                            put("isFreeTierVerified", false)
+                        })
+                    }
                     arr.put(JSONObject().apply {
                         put("id", p.id)
                         put("name", p.label)
                         put("type", p.id)
+                        put("protocol", "HTTPS")
                         put("enabled", true)
+                        put("connected", hasKey)
                         put("configured", hasKey)
                         put("hasApiKey", hasKey)
+                        put("requiresApiKey", p.id != "local-ai")
                         put("defaultModel", if (viewModel.providerId == p.id) viewModel.modelId else p.defaultModel)
                         put("activeModel", if (viewModel.providerId == p.id) viewModel.modelId else p.defaultModel)
                         put("baseUrl", if (viewModel.providerId == p.id) viewModel.baseUrl else p.defaultBaseUrl)
-                        val modelsArr = JSONArray()
-                        viewModel.modelCatalog.filter { it.providerId == p.id }.forEach { m ->
-                            modelsArr.put(JSONObject().apply {
-                                put("id", m.modelId)
-                                put("name", m.modelId)
-                                put("description", m.description)
-                                put("contextWindow", m.contextWindow)
-                            })
-                        }
                         put("models", modelsArr)
+                        put("cachedModels", modelsArr)
+                        put("credentials", JSONArray())
                     })
                 }
                 JSONObject().apply {
@@ -543,15 +569,60 @@ class AndroidWebBridge(
             pathOnly == "/api/settings" && method == "GET" -> {
                 JSONObject().apply {
                     put("settings", JSONObject().apply {
+                        put("accentColor", "#C7FF65")
+                        put("fontSize", "normal")
+                        put("reducedMotion", false)
                         put("defaultProviderId", viewModel.providerId)
                         put("defaultModelId", viewModel.modelId)
+                        put("requestTimeoutMs", 30000)
+                        put("maxRetries", 1)
+                        put("streamingEnabled", true)
                         put("maxAgentIterations", 10)
+                        put("maxToolCalls", 16)
+                        put("commandTimeoutMs", 25000)
+                        put("localAiThreads", 4)
+                        put("localAiContextLength", 2048)
+                        put("memoryRetentionDays", 90)
                     })
                     put("permissions", JSONObject().apply {
+                        put("READ_WORKSPACE", "ALLOW")
+                        put("CREATE_FILES", "ALLOW")
+                        put("MODIFY_FILES", "ALLOW")
+                        put("DELETE_FILES", "ASK")
                         put("FILE_READ", "ALLOW")
                         put("FILE_WRITE", "ALLOW")
                         put("TERMINAL_EXEC", "ASK")
                         put("APK_BUILD", "ALLOW")
+                    })
+                }.toString()
+            }
+
+            pathOnly == "/api/settings" && method == "POST" -> {
+                val settingsObj = body?.optJSONObject("settings")
+                val defProv = settingsObj?.optString("defaultProviderId")
+                val defMod = settingsObj?.optString("defaultModelId")
+                mainHandler.post {
+                    val p = defProv?.takeIf { it.isNotBlank() } ?: viewModel.providerId
+                    val m = defMod?.takeIf { it.isNotBlank() } ?: viewModel.modelId
+                    viewModel.saveProviderSettings(p, m, viewModel.baseUrl)
+                }
+                JSONObject().apply {
+                    put("success", true)
+                    put("settings", JSONObject().apply {
+                        put("accentColor", settingsObj?.optString("accentColor", "#C7FF65") ?: "#C7FF65")
+                        put("fontSize", settingsObj?.optString("fontSize", "normal") ?: "normal")
+                        put("reducedMotion", settingsObj?.optBoolean("reducedMotion", false) ?: false)
+                        put("defaultProviderId", if (!defProv.isNullOrBlank()) defProv else viewModel.providerId)
+                        put("defaultModelId", if (!defMod.isNullOrBlank()) defMod else viewModel.modelId)
+                        put("requestTimeoutMs", settingsObj?.optInt("requestTimeoutMs", 30000) ?: 30000)
+                        put("maxRetries", settingsObj?.optInt("maxRetries", 1) ?: 1)
+                        put("streamingEnabled", settingsObj?.optBoolean("streamingEnabled", true) ?: true)
+                        put("maxAgentIterations", settingsObj?.optInt("maxAgentIterations", 10) ?: 10)
+                        put("maxToolCalls", settingsObj?.optInt("maxToolCalls", 16) ?: 16)
+                        put("commandTimeoutMs", settingsObj?.optInt("commandTimeoutMs", 25000) ?: 25000)
+                        put("localAiThreads", settingsObj?.optInt("localAiThreads", 4) ?: 4)
+                        put("localAiContextLength", settingsObj?.optInt("localAiContextLength", 2048) ?: 2048)
+                        put("memoryRetentionDays", settingsObj?.optInt("memoryRetentionDays", 90) ?: 90)
                     })
                 }.toString()
             }
@@ -897,6 +968,7 @@ class AndroidWebBridge(
     }
 
     private fun skillToJson(sk: NativeSkill, includeInstructions: Boolean): JSONObject {
+        val now = System.currentTimeMillis()
         return JSONObject().apply {
             put("id", sk.id)
             put("name", sk.name)
@@ -905,14 +977,20 @@ class AndroidWebBridge(
             put("scope", sk.scope)
             put("version", "1.0.0")
             put("author", if (sk.isCustom) "User" else "OBSIDIAN Core")
-            put("source", if (sk.isCustom) "custom" else "builtin")
+            put("source", if (sk.isCustom) "custom" else "built-in")
             put("enabled", sk.enabled)
             put("hasScripts", false)
             put("tools", JSONArray(sk.tools))
+            put("requiredTools", JSONArray(sk.tools))
             put("tags", JSONArray(sk.keywords))
             put("keywords", JSONArray(sk.keywords))
             put("prerequisites", JSONArray())
-            put("updatedAt", System.currentTimeMillis())
+            put("path", "assets/skills/${sk.id}/SKILL.md")
+            put("canonicalPath", "assets/skills/${sk.id}/SKILL.md")
+            put("validationStatus", "valid")
+            put("createdAtMillis", now)
+            put("updatedAtMillis", now)
+            put("updatedAt", now)
             if (includeInstructions) {
                 put("instructions", sk.instructions)
                 put("rawMarkdown", "---\nname: ${sk.name}\ndescription: ${sk.description}\ncategory: ${sk.category}\n---\n\n${sk.instructions}")

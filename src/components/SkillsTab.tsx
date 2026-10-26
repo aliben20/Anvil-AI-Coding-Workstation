@@ -383,8 +383,33 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
   // ---------------------------------------------------------------------------
   // Filtered Skills Calculation
   // ---------------------------------------------------------------------------
+  const normalizedSkills = useMemo(() => {
+    return (skills || []).map((s) => ({
+      ...s,
+      id: s.id || 'unknown-skill',
+      name: s.name || s.id || 'Unnamed Skill',
+      description: s.description || 'No description provided.',
+      category: (s.category || 'general').toLowerCase() as SkillCategory,
+      scope: (s.scope || 'global') as SkillScope,
+      enabled: !!s.enabled,
+      requiredTools: Array.isArray(s.requiredTools)
+        ? s.requiredTools
+        : Array.isArray((s as any).tools)
+        ? (s as any).tools
+        : [],
+      keywords: Array.isArray(s.keywords)
+        ? s.keywords
+        : Array.isArray((s as any).tags)
+        ? (s as any).tags
+        : [],
+      validationStatus: s.validationStatus || 'valid',
+      canonicalPath: s.canonicalPath || s.path || '',
+      path: s.path || s.canonicalPath || '',
+    }));
+  }, [skills]);
+
   const filteredSkills = useMemo(() => {
-    return skills.filter((s) => {
+    return normalizedSkills.filter((s) => {
       // Scope filter
       if (selectedScope !== 'all' && s.scope !== selectedScope) return false;
 
@@ -404,12 +429,12 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchesName = s.name.toLowerCase().includes(q);
-        const matchesDesc = s.description.toLowerCase().includes(q);
-        const matchesId = s.id.toLowerCase().includes(q);
-        const matchesTools = s.requiredTools.some((t) => t.toLowerCase().includes(q));
-        const matchesKeywords = s.keywords?.some((k) => k.toLowerCase().includes(q));
-        const matchesPath = (s.canonicalPath || s.path || '').toLowerCase().includes(q);
+        const matchesName = (s.name || '').toLowerCase().includes(q);
+        const matchesDesc = (s.description || '').toLowerCase().includes(q);
+        const matchesId = (s.id || '').toLowerCase().includes(q);
+        const matchesTools = (s.requiredTools || []).some((t: string) => (t || '').toLowerCase().includes(q));
+        const matchesKeywords = (s.keywords || []).some((k: string) => (k || '').toLowerCase().includes(q));
+        const matchesPath = ((s.canonicalPath || s.path || '') as string).toLowerCase().includes(q);
         if (!matchesName && !matchesDesc && !matchesId && !matchesTools && !matchesKeywords && !matchesPath) {
           return false;
         }
@@ -417,16 +442,16 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
 
       return true;
     });
-  }, [skills, selectedScope, selectedCategory, selectedStatus, searchQuery]);
+  }, [normalizedSkills, selectedScope, selectedCategory, selectedStatus, searchQuery]);
 
   // Statistics counts
-  const totalCount = skills.length;
-  const enabledCount = skills.filter((s) => s.enabled).length;
-  const invalidCount = skills.filter(
+  const totalCount = normalizedSkills.length;
+  const enabledCount = normalizedSkills.filter((s) => s.enabled).length;
+  const invalidCount = normalizedSkills.filter(
     (s) => s.validationStatus && s.validationStatus !== 'valid'
   ).length;
-  const globalCount = skills.filter((s) => s.scope === 'global').length;
-  const workspaceCount = skills.filter((s) => s.scope === 'workspace').length;
+  const globalCount = normalizedSkills.filter((s) => s.scope === 'global').length;
+  const workspaceCount = normalizedSkills.filter((s) => s.scope === 'workspace').length;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0D1117] text-[#C9D1D9] overflow-hidden">
@@ -648,7 +673,7 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
                             className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium border ${catClass}`}
                           >
                             <CatIcon className="w-3 h-3" />
-                            {skill.category.toUpperCase()}
+                            {(skill.category || 'general').toUpperCase()}
                           </span>
                           <span
                             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border ${
@@ -673,8 +698,8 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
                             <span
                               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono border ${
                                 skill.validationStatus === 'missing'
-                                  ? 'text-amber-300 bg-amber-500/10 border-amber-500/20'
-                                  : 'text-rose-300 bg-rose-500/10 border-rose-500/20'
+                                ? 'text-amber-300 bg-amber-500/10 border-amber-500/20'
+                                : 'text-rose-300 bg-rose-500/10 border-rose-500/20'
                               }`}
                             >
                               <AlertTriangle className="w-2.5 h-2.5" />
@@ -721,14 +746,14 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
                       )}
 
                       {/* Tools badges */}
-                      {skill.requiredTools.length > 0 && (
+                      {(skill.requiredTools || []).length > 0 && (
                         <div className="mb-2.5">
                           <div className="text-[10px] text-[#6E7681] font-mono mb-1 flex items-center gap-1">
                             <Wrench className="w-2.5 h-2.5" />
                             DECLARED TOOLS
                           </div>
                           <div className="flex flex-wrap gap-1">
-                            {skill.requiredTools.slice(0, 3).map((tool) => (
+                            {(skill.requiredTools || []).slice(0, 3).map((tool: string) => (
                               <span
                                 key={tool}
                                 className="px-1.5 py-0.5 rounded bg-[#0D1117] border border-[#30363D] text-[10px] font-mono text-[#C9D1D9]"
@@ -736,9 +761,9 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
                                 {tool}
                               </span>
                             ))}
-                            {skill.requiredTools.length > 3 && (
+                            {(skill.requiredTools || []).length > 3 && (
                               <span className="px-1 py-0.5 text-[10px] font-mono text-[#8B949E]">
-                                +{skill.requiredTools.length - 3}
+                                +{(skill.requiredTools || []).length - 3}
                               </span>
                             )}
                           </div>
@@ -752,11 +777,11 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
                         <FolderOpen className="w-3 h-3 shrink-0 text-[#6E7681]" />
                         <span
                           className="text-[10px] font-mono text-[#6E7681] truncate"
-                          title={skill.canonicalPath || skill.path}
+                          title={skill.canonicalPath || skill.path || ''}
                         >
                           {skill.canonicalPath
-                            ? skill.canonicalPath.split(/[/\\]/).slice(-3).join('/')
-                            : skill.path}
+                            ? String(skill.canonicalPath).split(/[/\\]/).slice(-3).join('/')
+                            : skill.path || 'built-in'}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -963,13 +988,13 @@ export const SkillsTab: React.FC<SkillsTabProps> = ({
                   )}
 
                   {/* Declared Tools */}
-                  {inspectedSkill.requiredTools.length > 0 && (
+                  {(inspectedSkill.requiredTools || (inspectedSkill as any).tools || []).length > 0 && (
                     <div>
                       <div className="text-[10px] font-mono text-[#8B949E] uppercase mb-1">
                         Declared Tool Requirements
                       </div>
                       <div className="flex flex-wrap gap-1">
-                        {inspectedSkill.requiredTools.map((t) => (
+                        {(inspectedSkill.requiredTools || (inspectedSkill as any).tools || []).map((t: string) => (
                           <span
                             key={t}
                             className="px-2 py-0.5 rounded bg-[#0D1117] border border-[#30363D] text-[11px] font-mono text-[#C7FF65]"
